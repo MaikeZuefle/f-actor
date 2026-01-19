@@ -1,0 +1,31 @@
+# Ignore all log files
+*.log
+
+# Ignore VS Code settings folder
+.vscode/
+
+#
+text_fintetuning/scripts/run_blub.sh
+
+# Ignore Python cache files
+__pycache__/
+*/wandb/*
+wandb/
+wandb/*
+build
+*egg-info
+test_weights.py
+scripts_speech/inference_eval/debug*
+scripts_speech/debug*
+*.txt
+*.wav
+wavs/*
+text_outputs/*
+z_utils_script/*
+z_outputs/*
+myjob.sh
+myjudge.sh
+mypa.sh
+vosk-model-en-us-0.22/
+trained_models
+hf_models/

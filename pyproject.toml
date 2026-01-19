@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "full-duplex"
+version = "0.1.0"
+
+dependencies = [
+    "transformers",
+    "torch",
+    "dataset",
+    "wandb",
+    "sentencepiece",
+    "accelerate",
+    "deepspeed",
+    "pre-commit",
+    "evaluate",
+    "rouge_score",
+    "librosa", 
+    "soundfile",
+    "matplotlib", 
+    "hydra-core", 
+    "nemo-toolkit[tts]",
+    "tqdm",
+    "silero-vad",
+    "jiwer",
+    "torchcodec",
+]
+
+[tool.setuptools.packages.find]
+exclude = ["assets*", "benchmark*", "docs", "build", "dist*", "playground*", "scripts*", "tests*"]
+
+[tool.wheel]
+exclude = ["assets*", "benchmark*", "docs", "build", "dist*", "playground*", "scripts*", "tests*"]
+
+[tool.black]
+line-length = 88
+
+[tool.isort]
+line_length = 88
+profile = "black"
