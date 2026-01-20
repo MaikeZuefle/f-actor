@@ -1,0 +1,82 @@
+######### Example 1: ######### 
+
+Instruction Speaker 1: 
+Generate a dialogue between you (Emely) and another speaker (Elijha) based on the given narrative. Follow the specific behavior instructions for you.
+
+Narrative:
+- You touched Elijha's shoulder to try and give her some kind of comfort. It was a small gesture, but hopefully it would be enough to let Elijha know that you were there for her.
+
+Your behaviors:
+- backchannels: 2
+- interruptions: 2
+- starts the dialogue: True
+
+Ensure that the dialogue reflects the behaviours of you.
+
+Instruction Speaker 2: 
+Generate a dialogue between you (Elijha) and another speaker (Emely) based on the given narrative. Follow the specific behavior instructions for you.
+
+Narrative:
+- Emely touched your shoulder to try and give you some kind of comfort. It was a small gesture, but hopefully it would be enough to let you know that Emely was there for you.
+
+Your behaviors:
+- backchannels: 0
+- interruptions: 1
+- starts the dialogue: False
+
+Ensure that the dialogue reflects the behaviours of you.
+
+
+######### Example 2: ######### 
+Instruction Speaker 1: 
+Generate a dialogue between you (Zander) and another speaker (Andrianna) based on the given narrative. Follow the specific behavior instructions for you.
+
+Narrative:
+- You were confident as you told Andrianna the results of your exams. You had studied hard and knew you had done well. Andrianna was happy for her friend and congratulated you on your success.
+
+Your behaviors:
+- backchannels: 2
+- interruptions: 3
+- starts the dialogue: True
+
+Ensure that the dialogue reflects the behaviours of you.
+
+Instruction Speaker 2: 
+Generate a dialogue between you (Andrianna) and another speaker (Zander) based on the given narrative. Follow the specific behavior instructions for you.
+
+Narrative:
+- Zander was confident as she told you the results of her exams. She had studied hard and knew she had done well. You were happy for your friend and congratulated her on her success.
+
+Your behaviors:
+- backchannels: 2
+- interruptions: 0
+- starts the dialogue: False
+
+Ensure that the dialogue reflects the behaviours of you.
+
+
+######### Example 3: ######### 
+Instruction Speaker 1: 
+Generate a dialogue between you (Emeli) and another speaker (Najee) based on the given narrative. Follow the specific behavior instructions for you.
+Narrative:
+- You and Najee had a great time on your date. You showed Najee a good time, and you laughed and talked all night. You had a lot in common, and you really hit it off.
+
+Your behaviors:
+- backchannels: 0
+- interruptions: 0
+- starts the dialogue: True
+
+Ensure that the dialogue reflects the behaviours of you.
+
+Instruction Speaker 2: 
+Generate a dialogue between you (Najee) and another speaker (Emeli) based on the given narrative. Follow the specific behavior instructions for you.
+
+Narrative:
+- Emeli and you had a great time on your date. Emeli showed you a good time, and you laughed and talked all night. You had a lot in common, and you really hit it off.
+
+Your behaviors:
+- backchannels: 0
+- interruptions: 1
+- starts the dialogue: False
+
+Ensure that the dialogue reflects the behaviours of you.
