@@ -15,6 +15,7 @@ This repository contains the code accompanying the paper
 
 Spoken conversational systems require more than accurate speech generation to have human-like conversations: to feel natural and engaging, they must produce conversational behaviour that adapts dynamically to the context. Current spoken conversational systems, however, rarely allow such customization, limiting their naturalness and usability. In this work, we present the first open, instruction-following full-duplex conversational speech model that can be trained efficiently under typical academic resource constraints. By keeping the audio encoder frozen and finetuning only the language model, our model requires just 2,000 hours of data, without relying on large-scale pretraining or multi-stage optimization. The model can follow explicit instructions to control speaker voice, conversation topic, conversational behaviour (e.g., backchanneling and interruptions), and dialogue initiation. We propose a single-stage training protocol and systematically analyze design choices. Both the model and training code will be released to enable reproducible research on controllable full-duplex speech systems.
 
+Models and datasets will be released on HuggingFace soon.
 
 ## Released Resources
 
@@ -40,10 +41,7 @@ Example training scripts are located in [`scripts/train`](scripts/train/).
 
 ### Usage
 
-1. Adapt an existing training script to your needs:
-   ```
-   scripts/train/your-train-script.sh
-   ```
+1. Adapt an existing training script to your needs using an example script from [`scripts/train`](scripts/train/). More parameters can be found in [`arguments.py`](training/arguments/arguments.py).
 
 2. Run the training:
    ```bash
@@ -58,16 +56,12 @@ Example inference scripts for generating dialogues using two instances of the mo
 
 ### Usage
 
-1. Adapt an inference script:
-   ```
-   scripts/inference_eval/your-inference-script.sh
-   ```
-
+1. Adapt an inference script to your needs using an example script from [`scripts/inference_eval`](scripts/inference_eval/).
 2. Run inference:
    ```bash
    bash scripts/inference_eval/your-inference-script.sh
    ```
-   The generated stores will be stored in the output directory that is specified in the script.
+   The generated dialogues will be stored in the output directory that is specified in the script.
 
 ---
 
@@ -75,11 +69,8 @@ Example inference scripts for generating dialogues using two instances of the mo
 
 To run the same evaluation metrics as reported in the paper:
 
-1. Adapt the evaluation script:
-   ```
-   scripts/inference_eval/eval.sh
-   ```
-   Add the output directory that was used during inference, where the genereated dialogues are stored.
+1. Add the path of your model to the evaluation script in [`scripts/inference_eval`](scripts/inference_eval/).
+   Add the output directory that was used during inference.
 
 2. Run:
    ```bash
@@ -87,10 +78,42 @@ To run the same evaluation metrics as reported in the paper:
    ```
 
 ---
+## Generate Your Own Dialogues
+You can generate custom dialogues using the script
+[`training/inference_example.py`](training/inference_example.py).
+Before running the script, configure the following options at the bottom of the file:
+
+- **Speaker selection** (determines the voice used for each character)
+  - Four example speaker voices from the original Behaviour-SD are provided below.
+    Select any two of these voices for your dialogue.
+    - **Tom**
+      <audio controls src="training/example_speakers/tom.wav"></audio>
+    - **Brian**
+      <audio controls src="training/example_speakers/brian.wav"></audio>
+    - **Gweneth**
+      <audio controls src="training/example_speakers/gweneth.wav"></audio>
+    - **Rebeka**
+      <audio controls src="training/example_speakers/rebeka.wav"></audio>
+- **Starting speaker** (which speaker begins the conversation)
+- **Narrative context** (background or setup for the dialogue)
+
+An example can be found in
+[`training/inference_example.py`](training/inference_example.py).
+
+To run the script, use:
+
+```bash
+python training/inference_example.py
+```
+
 
 ## Example Dialogues
 
-Example dialogues generated with F-Actor can be found in the [`example_dialogues`](example_dialogues/) folder.
+Here are three example dialogues generated with F-Actor. The corresponding prompts can be found in this file: [`example_prompts`](example_dialogues/instructions_for_example_1_2_3.txt).
+
+<audio controls src="example_dialogues/example_1.wav"></audio>
+<audio controls src="example_dialogues/example_2.wav"></audio>
+<audio controls src="example_dialogues/example_3.wav"></audio>
 
 ---
 ## Citation
