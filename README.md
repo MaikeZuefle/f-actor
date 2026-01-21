@@ -86,14 +86,10 @@ Before running the script, configure the following options at the bottom of the 
 - **Speaker selection** (determines the voice used for each character)
   - Four example speaker voices from the original Behaviour-SD are provided below.
     Select any two of these voices for your dialogue.
-    - **Tom**
-      <audio controls src="training/example_speakers/tom.wav"></audio>
-    - **Brian**
-      <audio controls src="training/example_speakers/brian.wav"></audio>
-    - **Gweneth**
-      <audio controls src="training/example_speakers/gweneth.wav"></audio>
-    - **Rebeka**
-      <audio controls src="training/example_speakers/rebeka.wav"></audio>
+    - **Tom** [`tom.wav`](training/example_speakers/tom.wav)
+    - **Brian** [`brian.wav`](training/example_speakers/brian.wav)
+    - **Gweneth** [`gweneth.wav`](training/example_speakers/gweneth.wav)
+    - **Rebeka** [`rebeka.wav`](training/example_speakers/rebeka.wav)
 - **Starting speaker** (which speaker begins the conversation)
 - **Narrative context** (background or setup for the dialogue)
 
@@ -107,13 +103,8 @@ python training/inference_example.py
 ```
 
 
-## Example Dialogues
-
-Here are three example dialogues generated with F-Actor. The corresponding prompts can be found in this file: [`example_prompts`](example_dialogues/instructions_for_example_1_2_3.txt).
-
-<audio controls src="example_dialogues/example_1.wav"></audio>
-<audio controls src="example_dialogues/example_2.wav"></audio>
-<audio controls src="example_dialogues/example_3.wav"></audio>
+## Example Dialogues 
+Example dialogues generated with F-Actor can be found in the [`example_dialogues`](example_dialogues/) folder.
 
 ---
 ## Citation
