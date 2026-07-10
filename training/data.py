@@ -152,7 +152,7 @@ def load_speech_data(
         data_split = data_split.map(
             tokenize_speech,
             batched=False,
-            load_from_cache_file=False,
+            load_from_cache_file=True,
             num_proc=data_args.preprocessing_num_workers,
         )
         logger.info(
