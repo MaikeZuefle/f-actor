@@ -19,6 +19,7 @@ class DSUModel(ModelInitializerLoader):
         self.multi_text_stream = config.multi_text_stream
         self.use_speaker_embedding = config.use_speaker_embedding
         self.calc_loss_on_c1_only = config.calc_loss_on_c1_only
+        self.first_codebook_weight = getattr(config, "first_codebook_weight", 1.0)
 
         # vocab sizes for text and audio
         self.text_vocab_size = self.get_output_embeddings().weight.size(0)
@@ -177,6 +178,10 @@ class DSUModel(ModelInitializerLoader):
                 logits = logits.permute(0, 2, 1, 3)  # [B, L, H, V] -> [B, H, L, V]
 
                 weights = mask.float()
+                if loss_type == "dsus":
+                    # up-weight the first (semantic) codebook of each speaker's stream
+                    weights[:, :: self.num_dsus, :] *= self.first_codebook_weight
+
                 target = torch.where(mask, labels_shifted, torch.zeros_like(labels_shifted))
                 per_token_loss = F.cross_entropy(
                     logits.reshape(-1, logits.shape[-1]),
