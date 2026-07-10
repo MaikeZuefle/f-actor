@@ -120,12 +120,12 @@ class DSUModel(ModelInitializerLoader):
             audio_hidden_padded = hidden_states[:, -1:, :]
         else:
             # only get audio hidden states and repad
-            prompt_lens = (
-                prompt_dsu_attention_mask.sum(dim=1)
-                - (dsu_labels != self.pad_token_id).sum(dim=-1)[:, 0]
-            )
+            total_lens = prompt_dsu_attention_mask.sum(dim=1)
+            prompt_lens = total_lens - (dsu_labels != self.pad_token_id).sum(dim=-1)[:, 0]
 
-            audio_hidden = [hidden_states[b, prompt_lens[b] :, :] for b in range(B)]
+            audio_hidden = [
+                hidden_states[b, prompt_lens[b] : total_lens[b], :] for b in range(B)
+            ]
 
             audio_hidden_padded = pad_sequence(
                 audio_hidden, batch_first=True, padding_value=0.0
@@ -343,17 +343,17 @@ class DSUModel(ModelInitializerLoader):
             attention_mask[i, : seq.size(0)] = 1
 
         labels_all_dsu_heads = pad_sequence(
-            labels_all_dsu_heads,
+            [x.transpose(1, 0) for x in labels_all_dsu_heads],  # pad_sequence expects [L, H]
             batch_first=True,
             padding_value=self.pad_token_id,
-        )  # [B, H, L]
+        ).transpose(2, 1)  # [B, H, L]
 
         if labels_all_text_streams:
             labels_all_text_streams = pad_sequence(
-                labels_all_text_streams,
+                [x.transpose(1, 0) for x in labels_all_text_streams],  # pad_sequence expects [L, H]
                 batch_first=True,
                 padding_value=self.pad_token_id,
-            )
+            ).transpose(2, 1)  # [B, H, L]
         else:
             labels_all_text_streams = None
 
@@ -512,11 +512,11 @@ class DSUModel(ModelInitializerLoader):
         )
 
         labels_all_dsu_heads = pad_sequence(
-            labels_all_dsu_heads,
+            [x.transpose(1, 0) for x in labels_all_dsu_heads],  # pad_sequence expects [L, H]
             batch_first=True,
             padding_value=self.pad_token_id,
             padding_side="right",
-        )  # [B, H, L]
+        ).transpose(2, 1)  # [B, H, L]
 
         if labels_all_text_streams:
 
