@@ -36,6 +36,7 @@ class DataArgs:
     debug: bool = False
     use_system_narrative: bool = False
     remove_start_silence: bool = False
+    preprocessing_num_workers: Optional[int] = None
 
     def __post_init__(self):
         if (self.add_bc_token and self.add_counting_tokens) or (
