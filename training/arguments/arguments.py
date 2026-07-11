@@ -16,6 +16,8 @@ class ModelArgs:
     calc_loss_on_c1_only: bool = False
     first_codebook_weight: float = 1.0
     text_padding_weight: float = 1.0
+    use_depth_decoder: bool = False
+    depth_decoder_pretrained_path: str = "sesame/csm-1b"
 
     def __post_init__(self):
         if self.text_stream and self.multi_text_stream:

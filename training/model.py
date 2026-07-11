@@ -65,6 +65,8 @@ def load_model(model_args, grad_acc_steps=1, logger=None, inference=False):
     config.calc_loss_on_c1_only = model_args.calc_loss_on_c1_only
     config.first_codebook_weight = model_args.first_codebook_weight
     config.text_padding_weight = model_args.text_padding_weight
+    config.use_depth_decoder = model_args.use_depth_decoder
+    config.depth_decoder_pretrained_path = model_args.depth_decoder_pretrained_path
 
     # load model (if num_dsu < 1, this will be the normal model)
     model = model_cls.from_pretrained(
@@ -114,9 +116,12 @@ def load_model(model_args, grad_acc_steps=1, logger=None, inference=False):
         model.init_or_load_text_heads(model_path=model_id)
 
     if model.num_dsus > 0:
-        model.init_or_load_audio_heads(
-            model_path=model_id
-        )  # loads if dsu_head exists, else initializes
+        if model_args.use_depth_decoder:
+            model.init_or_load_depth_decoder_head(model_path=model_id)
+        else:
+            model.init_or_load_audio_heads(
+                model_path=model_id
+            )  # loads if dsu_head exists, else initializes
         model.init_or_load_audio_embeds(
             model_path=model_id
         )  # loads if audio_embeds exist, else initializes
