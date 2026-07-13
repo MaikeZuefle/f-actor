@@ -176,11 +176,16 @@ class DSUModel(ModelInitializerLoader):
                 mask = labels_shifted != self.pad_token_id
                 logits = logits.permute(0, 2, 1, 3)  # [B, L, H, V] -> [B, H, L, V]
 
-                logits_flat = logits[mask]
-                labels_flat = labels_shifted[mask]
-                loss = F.cross_entropy(
-                    logits_flat, labels_flat, ignore_index=self.pad_token_id
-                )
+                weights = mask.float()
+                target = torch.where(mask, labels_shifted, torch.zeros_like(labels_shifted))
+                per_token_loss = F.cross_entropy(
+                    logits.reshape(-1, logits.shape[-1]),
+                    target.reshape(-1),
+                    reduction="none",
+                ).view_as(target)
+
+                per_conversation_loss = (per_token_loss * weights).sum(dim=[1, 2]) / weights.sum(dim=[1, 2]).clamp(min=1)
+                loss = per_conversation_loss.mean()
 
                 total_loss += loss
                 if loss_type == "dsus":
