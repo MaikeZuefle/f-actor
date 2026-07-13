@@ -57,13 +57,6 @@ def train(args, logger):
         logger=logger,
     )
 
-    train_dataset, eval_dataset, data_collator = load_data(
-        model_args=model_args,
-        data_args=data_args,
-        audio_delay_id=model.audio_delay_id,
-        logger=logger,
-        tokenizer=tokenizer,
-    )
     # Training arguments
     hf_training_args = TrainingArguments(
         output_dir=training_args.output_dir,
@@ -93,6 +86,15 @@ def train(args, logger):
         auto_find_batch_size=training_args.auto_find_batch_size,
         remove_unused_columns=False,
     )
+
+    with hf_training_args.main_process_first():
+        train_dataset, eval_dataset, data_collator = load_data(
+            model_args=model_args,
+            data_args=data_args,
+            audio_delay_id=model.audio_delay_id,
+            logger=logger,
+            tokenizer=tokenizer,
+        )
 
     # log the training args
     combined_config = {

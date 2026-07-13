@@ -14,6 +14,7 @@ accelerate launch \
   --model_name $MODEL_NAME \
   --model_id ${MODEL_ID} \
   --speech_path "maikezu/f-actor-behavior-sd-nanocodec" \
+  --preprocessing_num_workers 8 \
   --output_dir $OUTPUT_DIR \
   --num_dsus 4 \
   --text_stream \
