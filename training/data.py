@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 from data_collator_dsu import DSUDataCollator
 from datasets import DatasetDict, load_dataset
 from dialogue_creation.get_prompt import build_prompt
@@ -12,8 +13,14 @@ from dialogue_creation.utils import (
 )
 
 
+def get_world_size():
+    if torch.distributed.is_available() and torch.distributed.is_initialized():
+        return torch.distributed.get_world_size()
+    return 1
+
+
 def load_speech_data(
-    model_args, data_args, audio_delay_id, logger, tokenizer, inference=False
+    model_args, data_args, training_args, audio_delay_id, logger, tokenizer, inference=False
 ):
 
     # get arguments
@@ -162,9 +169,31 @@ def load_speech_data(
             lambda x: not x["skip_example"],
             num_proc=data_args.preprocessing_num_workers,
         )
+
         logger.info(
             f"Train dataset after filtering invalid examples: {len(data_split)}"
         )
+
+        if not inference:
+            world_size = get_world_size()
+            per_device_batch_size = (
+                training_args.train_batch_size
+                if split_key == "train"
+                else training_args.eval_batch_size
+            )
+            effective_batch_size = per_device_batch_size * world_size
+            if split_key == "train":
+                effective_batch_size *= training_args.gradient_accumulation_steps
+
+            split_size = len(data_split)
+            remainder = split_size % effective_batch_size
+            if remainder != 0:
+                data_split = data_split.take(split_size - remainder)
+                logger.info(
+                    f"Dropped {remainder} example(s) from {split_key} split so its size "
+                    f"({split_size - remainder}) is divisible by the effective batch size "
+                    f"({effective_batch_size})."
+                )
 
         avg_overflow = np.mean(data_split["n_overflow_words"])
 
@@ -188,7 +217,7 @@ def load_speech_data(
 
 
 def load_data(
-    model_args, data_args, audio_delay_id, logger, tokenizer, inference=False
+    model_args, data_args, training_args, audio_delay_id, logger, tokenizer, inference=False
 ):
     logger.info(f"Loading dataset from {data_args.speech_path}.")
     num_dsus = model_args.num_dsus
@@ -198,6 +227,7 @@ def load_data(
     return load_speech_data(
         model_args,
         data_args,
+        training_args,
         audio_delay_id,
         logger,
         tokenizer,

@@ -91,6 +91,7 @@ def train(args, logger):
         train_dataset, eval_dataset, data_collator = load_data(
             model_args=model_args,
             data_args=data_args,
+            training_args=training_args,
             audio_delay_id=model.audio_delay_id,
             logger=logger,
             tokenizer=tokenizer,
