@@ -1,0 +1,21 @@
+{
+  "speaker1": {
+    "name": "Rebeka",
+    "narrative": "You like Gweneth a lot and you tell her that she is your best friend.",
+    "starts": true,
+    "backchannels": 2,
+    "interruptions": 2
+  },
+  "speaker2": {
+    "name": "Gweneth",
+    "narrative": "You like Rebeka but you are not sure if she is your best friend.",
+    "starts": false,
+    "backchannels": 2,
+    "interruptions": 2
+  },
+  "output_file": "choose_your_name.wav",
+  "max_length": 1024,
+  "temperature": 0.9,
+  "top_k": 40,
+  "top_p": 1.0
+}

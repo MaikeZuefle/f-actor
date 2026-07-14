@@ -1,3 +1,4 @@
+import argparse
 import json
 
 import numpy as np
@@ -47,15 +48,17 @@ def load_model():
     return model, tokenizer
 
 
-def prepare_prompt(system_speaker, user_speaker, narrative, speaks_first):
+def prepare_prompt(
+    system_speaker, user_speaker, narrative, speaks_first, backchannels, interruptions
+):
     prompt = f"""Generate a dialogue between you ({system_speaker}) and another speaker ({user_speaker}) based on the given narrative. Follow the specific behavior instructions for you.
 
 Narrative:
 {narrative}
 
 Your behaviors:
-- backchannels: 2
-- interruptions: 2
+- backchannels: {backchannels}
+- interruptions: {interruptions}
 - starts the dialogue: {speaks_first}
 
 Ensure that the dialogue reflects the behaviours of you.\n"""
@@ -64,32 +67,29 @@ Ensure that the dialogue reflects the behaviours of you.\n"""
     return prompt
 
 
-def prepare_input(
-    speaker1,
-    speaker2,
-    narrative_speaker1,
-    narrative_speaker2,
-    speaker1_start,
-    speaker2_start,
-):
+def prepare_input(speaker1, speaker2):
     prompt_speaker1 = prepare_prompt(
-        system_speaker=speaker1,
-        user_speaker=speaker2,
-        narrative=narrative_speaker1,
-        speaks_first=speaker1_start,
+        system_speaker=speaker1["name"],
+        user_speaker=speaker2["name"],
+        narrative=speaker1["narrative"],
+        speaks_first=speaker1["starts"],
+        backchannels=speaker1.get("backchannels", 2),
+        interruptions=speaker1.get("interruptions", 2),
     )
     prompt_speaker2 = prepare_prompt(
-        system_speaker=speaker2,
-        user_speaker=speaker1,
-        narrative=narrative_speaker2,
-        speaks_first=speaker2_start,
+        system_speaker=speaker2["name"],
+        user_speaker=speaker1["name"],
+        narrative=speaker2["narrative"],
+        speaks_first=speaker2["starts"],
+        backchannels=speaker2.get("backchannels", 2),
+        interruptions=speaker2.get("interruptions", 2),
     )
 
     with open("training/example_speakers/speaker_embeddings.json", "r") as f:
         spk_to_emb = json.load(f)
 
-    speaker_embed_speaker1 = np.array(spk_to_emb[speaker1.lower()])
-    speaker_embed_speaker2 = np.array(spk_to_emb[speaker2.lower()])
+    speaker_embed_speaker1 = np.array(spk_to_emb[speaker1["name"].lower()])
+    speaker_embed_speaker2 = np.array(spk_to_emb[speaker2["name"].lower()])
 
     return {
         "prompts": [prompt_speaker1, prompt_speaker2],
@@ -104,15 +104,10 @@ def remove_special_tokens(text):
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned
 
-def run_inference(
-    speaker1,
-    speaker2,
-    narrative_speaker1,
-    narrative_speaker2,
-    speaker1_start,
-    speaker2_start,
-    out_audio_file,
-):
+def run_inference(config):
+    speaker1 = config["speaker1"]
+    speaker2 = config["speaker2"]
+    out_audio_file = config.get("output_file", "dialogue.wav")
 
     # load model and tokenizer
     print("Loading model and tokenizer...")
@@ -121,14 +116,7 @@ def run_inference(
 
     # prepare instructions
     print("Preparing instructions...")
-    example = prepare_input(
-        speaker1,
-        speaker2,
-        narrative_speaker1,
-        narrative_speaker2,
-        speaker1_start,
-        speaker2_start,
-    )
+    example = prepare_input(speaker1, speaker2)
     inputs = tokenizer(
         example["prompts"],
         return_tensors="pt",
@@ -145,11 +133,11 @@ def run_inference(
         generated_ids = model.generate(
             input_ids=input_ids,
             attention_mask=attention_mask,
-            max_length=1024,
+            max_length=config.get("max_length", 1024),
             do_sample=True,
-            temperature=0.9,
-            top_k=40,
-            top_p=1.0,
+            temperature=config.get("temperature", 0.9),
+            top_k=config.get("top_k", 40),
+            top_p=config.get("top_p", 1.0),
             pad_token_id=tokenizer.eos_token_id,
             eos_token_id=tokenizer.eos_token_id,
             tokenizer=tokenizer,
@@ -187,6 +175,19 @@ def run_inference(
 
 
 def main():
+    parser = argparse.ArgumentParser(
+        description="Generate a custom dialogue with F-Actor from a JSON config."
+    )
+    parser.add_argument(
+        "--config",
+        default="confs/example_dialogue.json",
+        help="Path to a dialogue config JSON (see confs/example_dialogue.json).",
+    )
+    args = parser.parse_args()
+
+    with open(args.config, "r") as f:
+        config = json.load(f)
+
     speakers = [
         "Rebeka",
         "Gweneth",
@@ -194,33 +195,17 @@ def main():
         "Tom",
     ]
 
-    ####################################### Adjust this ######################################
-    speaker1 = speakers[0]
-    speaker2 = speakers[1]
-    narrative_speaker1 = (
-        f"You like {speakers[1]} a lot and you tell her that she is your best friend."
-    )
-    narrative_speaker2 = (
-        f"You like {speakers[0]} but you are not sure if she is your best friend."
-    )
-    speaker1_starts = True
-    speaker2_starts = False
-    out_audio_file = "choose_your_name.wav" 
+    for spk in (config["speaker1"], config["speaker2"]):
+        if spk["name"] not in speakers:
+            raise KeyError(
+                f"Invalid speaker '{spk['name']}', please choose speakers from {speakers}!"
+            )
 
-    #########################################################################################
+    text_speaker1, text_speaker2 = run_inference(config)
 
-    if not speaker1 in speakers or not speaker2 in speakers:
-        raise KeyError(f"Invalid speaker, please choose speakers from {speakers}!")
-
-    run_inference(
-        speaker1,
-        speaker2,
-        narrative_speaker1,
-        narrative_speaker2,
-        speaker1_starts,
-        speaker2_starts,
-        out_audio_file,
-    )
+    print("\n=== Transcripts ===")
+    print(f"{config['speaker1']['name']}: {text_speaker1}")
+    print(f"{config['speaker2']['name']}: {text_speaker2}")
 
 
 if __name__ == "__main__":
