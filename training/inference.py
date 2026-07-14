@@ -246,6 +246,7 @@ def prepare_inference(model_args, data_args, inference_args, logger):
     dataset = load_data(
         model_args=model_args,
         data_args=data_args,
+        training_args=None,
         audio_delay_id=model.audio_delay_id,
         logger=logger,
         tokenizer=tokenizer,
