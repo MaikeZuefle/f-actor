@@ -1,22 +1,16 @@
 import numpy as np
 
-COLUMNS_TO_REMOVE = [
-    "file_name",
-    "narrative",
-    "new_narrative_s1",
-    "new_narrative_s2",
-    "speakers",
-    "behaviors",
-    "num_turns",
-    "utterances",
-    "tts_speaker_ids",
-    "tts_genders",
-    "statistics",
-    "dsu_c1_path",
-    "dsu_c2_path",
-    "skip_example",
-    "n_overflow_words",
+COLUMNS_TO_SELECT = [
+    'input_ids',
+    'attention_mask',
+    'labels',
+    'dsu_ids',
+    'text_stream_ids',
+    'skip_example',
+    'n_overflow_words',
+    'spk_emb'
 ]
+
 SKIP_EXAMPLE_DICT_INFERENCE = {
     "input_text": None,
     "reference_text": None,

@@ -5,7 +5,7 @@ from datasets import DatasetDict, load_dataset
 from dialogue_creation.get_prompt import build_prompt
 from dialogue_creation.get_text_stream import adapt_to_text_stream
 from dialogue_creation.utils import (
-    COLUMNS_TO_REMOVE,
+    COLUMNS_TO_SELECT,
     SKIP_EXAMPLE_DICT_INFERENCE,
     SKIP_EXAMPLE_DICT_TRAIN,
     make_attention_mask,
@@ -202,9 +202,8 @@ def load_speech_data(
         )
         tokenized_dataset[split_key] = data_split
 
-    tokenized_dataset = tokenized_dataset.remove_columns(COLUMNS_TO_REMOVE)
-
     if not inference:
+        tokenized_dataset = tokenized_dataset.select_columns(COLUMNS_TO_SELECT)
         data_collator = DSUDataCollator(tokenizer=tokenizer, mlm=False)
         train_dataset, validation_dataset = (
             tokenized_dataset["train"],

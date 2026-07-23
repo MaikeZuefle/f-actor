@@ -25,6 +25,45 @@ class ModelInitializerLoader:
         else:
             self.init_audio_embeds()
 
+    def init_or_load_depth_decoder_head(self, model_path=None):
+        if self.num_dsus < 1:
+            return
+
+        from depth_decoder_head import CsmDepthDecoderHead
+
+        self.num_dsu_heads = self.num_dsus
+        self.depth_decoder_head = CsmDepthDecoderHead(
+            hidden_size=self.hidden_size,
+            audio_vocab_size=self.audio_vocab_size,
+            num_dsus=self.num_dsus,
+            pretrained_path=self.depth_decoder_pretrained_path,
+        )
+
+        if self.checkpoint_has_weights(model_path, "depth_decoder_head.semantic_head"):
+            state_dict = self.load_safetensors_state_dict(model_path)
+            for key in [
+                "depth_decoder_head.semantic_head.weight",
+                "depth_decoder_head.semantic_head.bias",
+                "depth_decoder_head.backbone_adapter.weight",
+            ]:
+                if key not in state_dict:
+                    raise KeyError(f"Missing key '{key}' in checkpoint {model_path}")
+
+            self.depth_decoder_head.semantic_head.weight.data.copy_(
+                state_dict["depth_decoder_head.semantic_head.weight"]
+            )
+            self.depth_decoder_head.semantic_head.bias.data.copy_(
+                state_dict["depth_decoder_head.semantic_head.bias"]
+            )
+            self.depth_decoder_head.backbone_adapter.weight.data.copy_(
+                state_dict["depth_decoder_head.backbone_adapter.weight"]
+            )
+            # depth_decoder.* weights are always taken fresh from the pretrained,
+            # frozen checkpoint above - they are never fine-tuned, so there is no
+            # need to load them again from our own training checkpoint.
+
+        self.depth_decoder_head.to(self.device, dtype=self.dtype)
+
     def init_or_load_text_heads(self, model_path=None):
         if not self.multi_text_stream:
             return
@@ -97,7 +136,9 @@ class ModelInitializerLoader:
 
         self.text_head = torch.nn.ModuleList(
             [
-                torch.nn.Linear(self.hidden_size, self.text_vocab_size).to(self.device)
+                torch.nn.Linear(self.hidden_size, self.text_vocab_size).to(
+                    self.device, dtype=self.dtype
+                )
                 for _ in range(self.num_text_heads)
             ]
         )
@@ -111,7 +152,7 @@ class ModelInitializerLoader:
         if self.num_dsus < 1:
             return
 
-        self.num_audio_embeds = self.num_dsu_heads
+        self.num_audio_embeds = self.num_dsus * 2
 
         # One embedding table per head
         self.audio_embeds = torch.nn.ModuleList(
@@ -133,7 +174,7 @@ class ModelInitializerLoader:
         Initialize a linear projection from speaker embedding dimension to hidden size.
         """
         self.speaker_embed_proj = torch.nn.Linear(spk_emb_dim, self.hidden_size).to(
-            self.device
+            self.device, dtype=self.dtype
         )
         torch.nn.init.xavier_uniform_(self.speaker_embed_proj.weight)
         torch.nn.init.zeros_(self.speaker_embed_proj.bias)
@@ -186,7 +227,7 @@ class ModelInitializerLoader:
         # Copy weights into the DSU head
         self.dsu_head.weight.data.copy_(pretrained_weight)
         self.dsu_head.bias.data.copy_(pretrained_bias)
-        self.dsu_head.to(self.device)
+        self.dsu_head.to(self.device, dtype=self.dtype)
 
     def load_text_heads(self, model_path):
         state_dict = self.load_safetensors_state_dict(model_path)
@@ -207,7 +248,7 @@ class ModelInitializerLoader:
                 raise KeyError(f"Missing key {weight_key} or {bias_key} in checkpoint")
             head.weight.data.copy_(state_dict[weight_key])
             head.bias.data.copy_(state_dict[bias_key])
-            head.to(self.device)
+            head.to(self.device, dtype=self.dtype)
 
     def load_audio_embeds(self, model_path):
         """Load separate audio embeddings from saved safetensors."""
@@ -242,7 +283,7 @@ class ModelInitializerLoader:
 
         # Move embeddings to model's device
         for emb in self.audio_embeds:
-            emb.to(self.device)
+            emb.to(self.device, dtype=self.dtype)
 
     def load_speaker_embed_proj(self, model_path, spk_emb_dim):
         """
@@ -259,4 +300,4 @@ class ModelInitializerLoader:
 
         self.speaker_embed_proj.weight.data.copy_(state_dict[weight_key])
         self.speaker_embed_proj.bias.data.copy_(state_dict[bias_key])
-        self.speaker_embed_proj.to(self.device)
+        self.speaker_embed_proj.to(self.device, dtype=self.dtype)
