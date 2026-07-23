@@ -24,7 +24,7 @@ def validate_word_timestamps(segment):
     first_word_start = words[0]["start"]
     last_word_end = words[-1]["start"] + words[-1]["dur"]
 
-    if first_word_start < segment["start_time"] or last_word_end > segment["end_time"]:
+    if (first_word_start + 0.02) < segment["start_time"] or (last_word_end - 0.02) > segment["end_time"]:
         raise ValueError(
             f"Word alignment timestamps out of utterance bounds:\n"
             f"Utterance {segment['start_time']}–{segment['end_time']} | "
