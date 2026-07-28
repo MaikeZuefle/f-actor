@@ -6,10 +6,8 @@ import re
 
 import numpy as np
 from special_tokens import (
-    BC_COUNTS,
     BC_TOKEN,
     EPAD,
-    INTER_COUNTS,
     INTER_TOKEN,
     SILENCE_PAD,
     UTTERANCE_PAD,
@@ -43,7 +41,6 @@ def create_text_stream(
     word_alignment=False,
     add_bc_token=False,
     add_interrupt_token=False,
-    add_counting_tokens=False,
     add_epad_token=False,
 ):
 
@@ -58,8 +55,6 @@ def create_text_stream(
     text_ids = np.full(n_dsu, silence_pad_id, dtype=int)
 
     return_skip_example = lambda: (text_ids, True, overflow_words)
-
-    inter_bc_count = {0: {"inter": 0, "bc": 0}, 1: {"inter": 0, "bc": 0}}
 
     overflow_words = 0
     for utt in example["utterances"]:
@@ -110,48 +105,19 @@ def create_text_stream(
                         overflow_words += 1
 
                     # get tokens
-                    if add_counting_tokens:
-                        if utt_type == "bc":
-                            if wi == 0:
-                                inter_bc_count[utt["speaker_idx"]]["bc"] += 1
-                                current_bcs = inter_bc_count[utt["speaker_idx"]]["bc"]
-                                word = f"{BC_COUNTS[current_bcs]} {word}"
-
-                            else:
-                                word = " " + word
-
-                            # current_bcs = inter_bc_count[utt["speaker_idx"]]["bc"]
-                            # word = BC_COUNTS[current_bcs] * (orig_dsu_span)
-
-                        elif utt_type == "interrupt":
-
-                            if wi == 0:
-                                inter_bc_count[utt["speaker_idx"]]["inter"] += 1
-                                current_inter = inter_bc_count[utt["speaker_idx"]][
-                                    "inter"
-                                ]
-                                word = f"{INTER_COUNTS[current_inter]} {word}"
-
-                            else:
-                                word = " " + word
+                    if utt_type == "bc" and add_bc_token:
+                        if wi == 0:
+                            word = f"{BC_TOKEN} {word}"
                         else:
-                            if wi != 0:
-                                word = " " + word
+                            word = " " + word
+                    elif utt_type == "interrupt" and add_interrupt_token:
+                        if wi == 0:
+                            word = f"{INTER_TOKEN} {word}"
+                        else:
+                            word = " " + word
                     else:
-                        if utt_type == "bc" and add_bc_token:
-                            # word = BC_TOKEN * (orig_dsu_span)
-                            if wi == 0:
-                                word = f"{BC_TOKEN} {word}"
-                            else:
-                                word = " " + word
-                        elif utt_type == "interrupt" and add_interrupt_token:
-                            if wi == 0:
-                                word = f"{INTER_TOKEN} {word}"
-                            else:
-                                word = " " + word
-                        else:
-                            if wi != 0:
-                                word = " " + word
+                        if wi != 0:
+                            word = " " + word
                     tokens = tokenizer(word, add_special_tokens=False)["input_ids"]
                     num_tokens = len(tokens)
 
@@ -183,20 +149,8 @@ def create_text_stream(
                 tts_text = segment["tts_text"].lower()
                 tts_text = re.sub(r"[.,!?] ", " ", tts_text + " ").strip()
 
-                if add_counting_tokens:
-                    if utt_type == "bc":
-                        inter_bc_count[utt["speaker_idx"]]["bc"] += 1
-                        current_bcs = inter_bc_count[utt["speaker_idx"]]["bc"]
-                        tts_text = BC_COUNTS[current_bcs] * len(tts_text)
-
-                    elif utt_type == "interrupt":
-                        inter_bc_count[utt["speaker_idx"]]["inter"] += 1
-                        current_inter = inter_bc_count[utt["speaker_idx"]]["inter"]
-                        tts_text = f"{INTER_COUNTS[current_inter]} {tts_text}"
-
-                elif utt_type == "bc" and add_bc_token:
+                if utt_type == "bc" and add_bc_token:
                     tts_text = len(tts_text) * BC_TOKEN
-                    # tts_text = f"{BC_TOKEN}{tts_text}"
                 elif utt_type == "interrupt" and add_interrupt_token:
                     tts_text = f"{INTER_TOKEN} {tts_text}"
 
@@ -263,7 +217,6 @@ def adapt_to_text_stream(
     role_to_speaker_map,
     add_bc_token=False,
     add_interrupt_token=False,
-    add_counting_tokens=False,
     add_epad_token=False,
 ):
 
@@ -287,7 +240,6 @@ def adapt_to_text_stream(
             word_alignment=word_alignment,
             add_bc_token=add_bc_token,
             add_interrupt_token=add_interrupt_token,
-            add_counting_tokens=add_counting_tokens,
             add_epad_token=add_epad_token,
         )
         total_overflow_words += n_overflow_words
