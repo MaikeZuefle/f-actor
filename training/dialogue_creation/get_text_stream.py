@@ -7,6 +7,7 @@ import re
 import numpy as np
 from special_tokens import (
     BC_TOKEN,
+    EOU,
     EPAD,
     INTER_TOKEN,
     SILENCE_PAD,
@@ -42,6 +43,7 @@ def create_text_stream(
     add_bc_token=False,
     add_interrupt_token=False,
     add_epad_token=False,
+    add_eou_token=False,
 ):
 
     audio_duration = example["utterances"][-1]["end_time"]  # total time of conversation
@@ -52,6 +54,7 @@ def create_text_stream(
     utterance_pad_id = tokenizer.convert_tokens_to_ids(UTTERANCE_PAD)
     word_pad_id = tokenizer.convert_tokens_to_ids(WORD_PAD)
     epad_id = tokenizer.convert_tokens_to_ids(EPAD)
+    eou_id = tokenizer.convert_tokens_to_ids(EOU)
     bc_token_id = tokenizer.convert_tokens_to_ids(BC_TOKEN) if add_bc_token else None
     inter_token_id = (
         tokenizer.convert_tokens_to_ids(INTER_TOKEN) if add_interrupt_token else None
@@ -156,6 +159,25 @@ def create_text_stream(
 
                     last_end_idx = end_idx
 
+                # mark the end of the utterance/segment at the frame right
+                # after its last word's placed tokens, so the model gets an
+                # explicit "speaker just finished" cue (the counterpart to
+                # EPAD's "a word is about to start"). Unlike EPAD/BC/INTER,
+                # EOU is always inserted: if the immediate frame clashes with
+                # real content, it falls back to the next frame instead of
+                # being dropped.
+                if add_eou_token:
+                    eou_idx = last_end_idx
+                    if (
+                        eou_idx < len(text_ids)
+                        and text_ids[eou_idx]
+                        not in (silence_pad_id, utterance_pad_id, word_pad_id)
+                    ):
+                        eou_idx += 1
+                    if eou_idx < len(text_ids):
+                        text_ids[eou_idx] = eou_id
+                        last_end_idx = eou_idx + 1
+
             else:  # do utterance level speech-text alignment
                 tts_text = segment["tts_text"].lower()
                 tts_text = re.sub(r"[.,!?] ", " ", tts_text + " ").strip()
@@ -229,6 +251,7 @@ def adapt_to_text_stream(
     add_bc_token=False,
     add_interrupt_token=False,
     add_epad_token=False,
+    add_eou_token=False,
 ):
 
     min_delay = min(audio_delay, text_delay)
@@ -252,6 +275,7 @@ def adapt_to_text_stream(
             add_bc_token=add_bc_token,
             add_interrupt_token=add_interrupt_token,
             add_epad_token=add_epad_token,
+            add_eou_token=add_eou_token,
         )
         total_overflow_words += n_overflow_words
 
