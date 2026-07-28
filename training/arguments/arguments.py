@@ -29,6 +29,9 @@ class ModelArgs:
 # Data arguments
 @dataclass
 class DataArgs:
+    # One or more HF dataset repos, comma-separated (e.g. "org/ds1,org/ds2").
+    # Only the first dataset's "validation" split is used for eval; all
+    # datasets' "train" splits are concatenated for training.
     speech_path: Optional[str] = None
     train_on_subset: Optional[float] = None
     n_delay_text_stream: int = 0

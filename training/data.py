@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 from data_collator_dsu import DSUDataCollator
-from datasets import DatasetDict, load_dataset
+from datasets import concatenate_datasets, load_dataset
 from dialogue_creation.get_prompt import build_prompt
 from dialogue_creation.get_text_stream import adapt_to_text_stream
 from dialogue_creation.utils import (
@@ -141,13 +141,10 @@ def load_speech_data(
         return return_dict
 
     logger.info("Preprocessing speech")
-    dataset = load_dataset(data_args.speech_path)
+    speech_paths = [p.strip() for p in data_args.speech_path.split(",") if p.strip()]
+    datasets_list = [load_dataset(path) for path in speech_paths]
 
-    split_keys = ["train", "validation"] if not inference else ["test"]
-    tokenized_dataset = DatasetDict()
-    for split_key in split_keys:
-        data_split = dataset[split_key]
-
+    def process_split(data_split, split_key, source_desc):
         if data_args.debug or data_args.train_on_subset:
             subset_size = (
                 int(len(data_split) * data_args.train_on_subset)
@@ -163,56 +160,71 @@ def load_speech_data(
             num_proc=data_args.preprocessing_num_workers,
         )
         logger.info(
-            f"{split_key} dataset size before filtering invalid examples: {len(data_split)}"
+            f"{source_desc} {split_key} dataset size before filtering invalid examples: {len(data_split)}"
         )
         data_split = data_split.filter(
             lambda x: not x["skip_example"],
             num_proc=data_args.preprocessing_num_workers,
         )
-
         logger.info(
-            f"Train dataset after filtering invalid examples: {len(data_split)}"
+            f"{source_desc} {split_key} dataset after filtering invalid examples: {len(data_split)}"
         )
+        return data_split
 
-        if not inference:
-            world_size = get_world_size()
-            per_device_batch_size = (
-                training_args.train_batch_size
-                if split_key == "train"
-                else training_args.eval_batch_size
+    def trim_to_effective_batch_size(data_split, split_key):
+        world_size = get_world_size()
+        per_device_batch_size = (
+            training_args.train_batch_size
+            if split_key == "train"
+            else training_args.eval_batch_size
+        )
+        effective_batch_size = per_device_batch_size * world_size
+        if split_key == "train":
+            effective_batch_size *= training_args.gradient_accumulation_steps
+
+        split_size = len(data_split)
+        remainder = split_size % effective_batch_size
+        if remainder != 0:
+            data_split = data_split.take(split_size - remainder)
+            logger.info(
+                f"Dropped {remainder} example(s) from {split_key} split so its size "
+                f"({split_size - remainder}) is divisible by the effective batch size "
+                f"({effective_batch_size})."
             )
-            effective_batch_size = per_device_batch_size * world_size
-            if split_key == "train":
-                effective_batch_size *= training_args.gradient_accumulation_steps
+        return data_split
 
-            split_size = len(data_split)
-            remainder = split_size % effective_batch_size
-            if remainder != 0:
-                data_split = data_split.take(split_size - remainder)
-                logger.info(
-                    f"Dropped {remainder} example(s) from {split_key} split so its size "
-                    f"({split_size - remainder}) is divisible by the effective batch size "
-                    f"({effective_batch_size})."
-                )
-
+    def log_avg_overflow(data_split, split_key):
         avg_overflow = np.mean(data_split["n_overflow_words"])
-
         logger.info(
             f"Average n_overflow_words per dialgoue in {split_key} dataset: {avg_overflow:.2f}"
         )
-        tokenized_dataset[split_key] = data_split
 
-    if not inference:
-        tokenized_dataset = tokenized_dataset.select_columns(COLUMNS_TO_SELECT)
-        data_collator = DSUDataCollator(tokenizer=tokenizer, mlm=False)
-        train_dataset, validation_dataset = (
-            tokenized_dataset["train"],
-            tokenized_dataset["validation"],
-        )
+    if inference:
+        data_split = process_split(datasets_list[0]["test"], "test", speech_paths[0])
+        log_avg_overflow(data_split, "test")
+        return data_split
 
-        return train_dataset, validation_dataset, data_collator
-    else:
-        return tokenized_dataset["test"]
+    train_splits = []
+    for path, dataset in zip(speech_paths, datasets_list):
+        data_split = process_split(dataset["train"], "train", path)
+        data_split = data_split.select_columns(COLUMNS_TO_SELECT)
+        train_splits.append(data_split)
+
+    train_dataset = (
+        concatenate_datasets(train_splits) if len(train_splits) > 1 else train_splits[0]
+    )
+    train_dataset = trim_to_effective_batch_size(train_dataset, "train")
+    log_avg_overflow(train_dataset, "train")
+
+    validation_dataset = process_split(
+        datasets_list[0]["validation"], "validation", speech_paths[0]
+    )
+    validation_dataset = validation_dataset.select_columns(COLUMNS_TO_SELECT)
+    validation_dataset = trim_to_effective_batch_size(validation_dataset, "validation")
+    log_avg_overflow(validation_dataset, "validation")
+
+    data_collator = DSUDataCollator(tokenizer=tokenizer, mlm=False)
+    return train_dataset, validation_dataset, data_collator
 
 
 def load_data(
