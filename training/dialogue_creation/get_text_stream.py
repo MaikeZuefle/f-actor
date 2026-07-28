@@ -8,6 +8,7 @@ import numpy as np
 from special_tokens import (
     BC_COUNTS,
     BC_TOKEN,
+    EPAD,
     INTER_COUNTS,
     INTER_TOKEN,
     SILENCE_PAD,
@@ -43,6 +44,7 @@ def create_text_stream(
     add_bc_token=False,
     add_interrupt_token=False,
     add_counting_tokens=False,
+    add_epad_token=False,
 ):
 
     audio_duration = example["utterances"][-1]["end_time"]  # total time of conversation
@@ -52,6 +54,7 @@ def create_text_stream(
     silence_pad_id = tokenizer.convert_tokens_to_ids(SILENCE_PAD)
     utterance_pad_id = tokenizer.convert_tokens_to_ids(UTTERANCE_PAD)
     word_pad_id = tokenizer.convert_tokens_to_ids(WORD_PAD)
+    epad_id = tokenizer.convert_tokens_to_ids(EPAD)
     text_ids = np.full(n_dsu, silence_pad_id, dtype=int)
 
     return_skip_example = lambda: (text_ids, True, overflow_words)
@@ -88,7 +91,11 @@ def create_text_stream(
 
                 # Fill the whole utterance region first with UTTERANCE_PAD
                 text_ids[start_u_idx:end_u_idx] = utterance_pad_id
-                last_end_idx = 0
+                # start at 1 rather than 0 when EPAD is enabled so the very
+                # first word (if it starts at frame 0) is nudged to frame 1,
+                # leaving room for EPAD, instead of changing the stream-wide
+                # delay.
+                last_end_idx = 1 if add_epad_token else 0
 
                 for wi, word_info in enumerate(words):
                     word = word_info["word"].lower()
@@ -150,6 +157,16 @@ def create_text_stream(
 
                     # get new start and end index (if previous tokens too long)
                     start_idx = max(last_end_idx, start_idx)
+
+                    if add_epad_token:
+                        epad_idx = start_idx - 1
+                        if text_ids[epad_idx] in (
+                            silence_pad_id,
+                            utterance_pad_id,
+                            word_pad_id,
+                        ):
+                            text_ids[epad_idx] = epad_id
+
                     end_idx = max(start_idx + num_tokens, end_idx)
                     span = end_idx - start_idx
 
@@ -247,6 +264,7 @@ def adapt_to_text_stream(
     add_bc_token=False,
     add_interrupt_token=False,
     add_counting_tokens=False,
+    add_epad_token=False,
 ):
 
     min_delay = min(audio_delay, text_delay)
@@ -270,6 +288,7 @@ def adapt_to_text_stream(
             add_bc_token=add_bc_token,
             add_interrupt_token=add_interrupt_token,
             add_counting_tokens=add_counting_tokens,
+            add_epad_token=add_epad_token,
         )
         total_overflow_words += n_overflow_words
 

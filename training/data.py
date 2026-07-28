@@ -64,6 +64,7 @@ def load_speech_data(
                     add_bc_token=data_args.add_bc_token,
                     add_interrupt_token=data_args.add_interrupt_token,
                     add_counting_tokens=data_args.add_counting_tokens,
+                    add_epad_token=data_args.add_epad_token,
                 )
             )
             if skip_example:

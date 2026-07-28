@@ -3,7 +3,13 @@ import os
 import torch
 from huggingface_hub import snapshot_download
 from modeling_dsu import DSULlama
-from special_tokens import SILENCE_PAD, TEXT_STREAM_TOKENS, UTTERANCE_PAD, WORD_PAD
+from special_tokens import (
+    EPAD,
+    SILENCE_PAD,
+    TEXT_STREAM_TOKENS,
+    UTTERANCE_PAD,
+    WORD_PAD,
+)
 from transformers import AutoConfig, AutoTokenizer
 
 
@@ -96,7 +102,7 @@ def load_model(model_args, grad_acc_steps=1, logger=None, inference=False):
             logger=logger,
         )
         model.text_padding_ids = tokenizer.convert_tokens_to_ids(
-            [SILENCE_PAD, UTTERANCE_PAD, WORD_PAD]
+            [SILENCE_PAD, UTTERANCE_PAD, WORD_PAD, EPAD]
         )
 
     if model.get_input_embeddings().num_embeddings < len(tokenizer):

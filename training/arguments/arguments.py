@@ -40,6 +40,7 @@ class DataArgs:
     add_bc_token: bool = False
     add_interrupt_token: bool = False
     add_counting_tokens: bool = False
+    add_epad_token: bool = False
     debug: bool = False
     use_system_narrative: bool = False
     remove_start_silence: bool = False
