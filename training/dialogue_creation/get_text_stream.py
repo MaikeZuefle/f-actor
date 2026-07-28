@@ -52,11 +52,23 @@ def create_text_stream(
     utterance_pad_id = tokenizer.convert_tokens_to_ids(UTTERANCE_PAD)
     word_pad_id = tokenizer.convert_tokens_to_ids(WORD_PAD)
     epad_id = tokenizer.convert_tokens_to_ids(EPAD)
+    bc_token_id = tokenizer.convert_tokens_to_ids(BC_TOKEN) if add_bc_token else None
+    inter_token_id = (
+        tokenizer.convert_tokens_to_ids(INTER_TOKEN) if add_interrupt_token else None
+    )
     text_ids = np.full(n_dsu, silence_pad_id, dtype=int)
 
     return_skip_example = lambda: (text_ids, True, overflow_words)
 
     overflow_words = 0
+    # tracks the end of the last word placed anywhere in the stream so far
+    # (across segments/utterances), so overlap detection and marker-frame
+    # placement both see the true prior position rather than resetting per
+    # segment. Starts at 1 rather than 0 when a marker frame (EPAD, or a
+    # BC/INTER segment marker) may be needed before the very first word, so
+    # that word (if it starts at frame 0) is nudged to frame 1, leaving room
+    # for the marker, instead of changing the stream-wide delay.
+    last_end_idx = 1 if (add_epad_token or add_bc_token or add_interrupt_token) else 0
     for utt in example["utterances"]:
 
         if utt["speaker_idx"] == speaker_to_use:
@@ -86,11 +98,13 @@ def create_text_stream(
 
                 # Fill the whole utterance region first with UTTERANCE_PAD
                 text_ids[start_u_idx:end_u_idx] = utterance_pad_id
-                # start at 1 rather than 0 when EPAD is enabled so the very
-                # first word (if it starts at frame 0) is nudged to frame 1,
-                # leaving room for EPAD, instead of changing the stream-wide
-                # delay.
-                last_end_idx = 1 if add_epad_token else 0
+
+                if utt_type == "bc" and add_bc_token:
+                    segment_marker_id = bc_token_id
+                elif utt_type == "interrupt" and add_interrupt_token:
+                    segment_marker_id = inter_token_id
+                else:
+                    segment_marker_id = None
 
                 for wi, word_info in enumerate(words):
                     word = word_info["word"].lower()
@@ -99,39 +113,36 @@ def create_text_stream(
                     end_idx = int(
                         (word_info["start"] + word_info["dur"]) * frames_per_sec
                     )
-                    orig_dsu_span = end_idx - start_idx
 
                     if last_end_idx > start_idx:
                         overflow_words += 1
 
-                    # get tokens
-                    if utt_type == "bc" and add_bc_token:
-                        if wi == 0:
-                            word = f"{BC_TOKEN} {word}"
-                        else:
-                            word = " " + word
-                    elif utt_type == "interrupt" and add_interrupt_token:
-                        if wi == 0:
-                            word = f"{INTER_TOKEN} {word}"
-                        else:
-                            word = " " + word
-                    else:
-                        if wi != 0:
-                            word = " " + word
+                    if wi != 0:
+                        word = " " + word
                     tokens = tokenizer(word, add_special_tokens=False)["input_ids"]
                     num_tokens = len(tokens)
 
                     # get new start and end index (if previous tokens too long)
                     start_idx = max(last_end_idx, start_idx)
 
-                    if add_epad_token:
-                        epad_idx = start_idx - 1
-                        if text_ids[epad_idx] in (
+                    # BC/INTER segment markers supersede EPAD on the segment's
+                    # first word, since they already signal "a word is about
+                    # to start" (plus the backchannel/interrupt event itself).
+                    if wi == 0 and segment_marker_id is not None:
+                        marker_id = segment_marker_id
+                    elif add_epad_token:
+                        marker_id = epad_id
+                    else:
+                        marker_id = None
+
+                    if marker_id is not None:
+                        marker_idx = start_idx - 1
+                        if text_ids[marker_idx] in (
                             silence_pad_id,
                             utterance_pad_id,
                             word_pad_id,
                         ):
-                            text_ids[epad_idx] = epad_id
+                            text_ids[marker_idx] = marker_id
 
                     end_idx = max(start_idx + num_tokens, end_idx)
                     span = end_idx - start_idx
