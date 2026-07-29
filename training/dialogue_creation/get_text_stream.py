@@ -15,6 +15,18 @@ from special_tokens import (
     WORD_PAD,
 )
 
+# Class ids for the undelayed, output-only "event" head: predicts, from
+# frame i-1, which of these events (if any) occurs at frame i. Unlike the
+# EPAD/BC/INTERRUPT/EOU markers inserted into the text stream, this label is
+# never shifted by delay_frames/audio_delay content-wise — it always
+# reflects the true, undelayed position of the event so the head stays
+# reactive rather than inheriting the text/audio channels' lookahead buffer.
+EVENT_NONE = 0
+EVENT_EPAD = 1
+EVENT_BC = 2
+EVENT_INTERRUPT = 3
+EVENT_EOU = 4
+
 
 def validate_word_timestamps(segment):
     words = segment["words"]
@@ -60,8 +72,9 @@ def create_text_stream(
         tokenizer.convert_tokens_to_ids(INTER_TOKEN) if add_interrupt_token else None
     )
     text_ids = np.full(n_dsu, silence_pad_id, dtype=int)
+    event_ids = np.full(n_dsu, EVENT_NONE, dtype=int)
 
-    return_skip_example = lambda: (text_ids, True, overflow_words)
+    return_skip_example = lambda: (text_ids, event_ids, True, overflow_words)
 
     overflow_words = 0
     # tracks the end of the last word placed anywhere in the stream so far
@@ -179,6 +192,9 @@ def create_text_stream(
                         last_end_idx = eou_idx + 1
 
             else:  # do utterance level speech-text alignment
+                # No frame-level markers are placed in this mode, so
+                # event_ids stays EVENT_NONE throughout — the event head
+                # requires word_alignment=True.
                 tts_text = segment["tts_text"].lower()
                 tts_text = re.sub(r"[.,!?] ", " ", tts_text + " ").strip()
 
@@ -200,6 +216,23 @@ def create_text_stream(
 
                 text_ids[start_idx : start_idx + len(tokens)] = tokens
 
+    # Derive event_ids from the undelayed text_ids via a token-id -> class
+    # mapping, before the delay shift below is applied: the event head has
+    # no delay, so its label must stay aligned to the true frame at which
+    # the event occurs, not the (possibly marker-skipped-on-collision)
+    # delayed text-stream position.
+    event_map = {
+        epad_id: EVENT_EPAD,
+        eou_id: EVENT_EOU,
+    }
+    if bc_token_id is not None:
+        event_map[bc_token_id] = EVENT_BC
+    if inter_token_id is not None:
+        event_map[inter_token_id] = EVENT_INTERRUPT
+    event_ids = np.full(n_dsu, EVENT_NONE, dtype=int)
+    for token_id, event_class in event_map.items():
+        event_ids[text_ids == token_id] = event_class
+
     # delay speech frame
     if delay_frames != 0:
         text_ids = np.concatenate(
@@ -209,9 +242,11 @@ def create_text_stream(
             ]
         )
     assert len(text_ids) == n_dsu
+    assert len(event_ids) == n_dsu
 
     text_ids = text_ids[:max_length]
-    return text_ids, False, overflow_words
+    event_ids = event_ids[:max_length]
+    return text_ids, event_ids, False, overflow_words
 
 
 def add_audio_delay(
@@ -220,6 +255,7 @@ def add_audio_delay(
     audio_delay_id,
     dsu_ids_list,
     text_stream_ids,
+    event_ids=None,
 ):
     delay_id = audio_delay_id
     delays_audio = np.full(
@@ -233,7 +269,14 @@ def add_audio_delay(
     silence_pad_id = tokenizer.convert_tokens_to_ids(SILENCE_PAD)
     silence_text = np.full((audio_delay), silence_pad_id)
     text_stream_ids = np.concatenate([text_stream_ids, silence_text])
-    return dsu_ids_list, text_stream_ids
+
+    if event_ids is not None:
+        # Padding only (no real event content), so this does not
+        # reintroduce delay into the event labels themselves.
+        event_pad = np.full((audio_delay), EVENT_NONE, dtype=event_ids.dtype)
+        event_ids = np.concatenate([event_ids, event_pad])
+
+    return dsu_ids_list, text_stream_ids, event_ids
 
 
 def adapt_to_text_stream(
@@ -260,11 +303,12 @@ def adapt_to_text_stream(
 
     num_text_streams = 2 if multi_text_stream else 1
     text_stream_ids_list = []
+    event_ids_list = []
     skip_examples = []
 
     total_overflow_words = 0
     for role in ["system", "user"][:num_text_streams]:
-        ts_ids, skip, n_overflow_words = create_text_stream(
+        ts_ids, event_ids, skip, n_overflow_words = create_text_stream(
             orig_dsu_length,
             example,
             tokenizer,
@@ -280,20 +324,31 @@ def adapt_to_text_stream(
         total_overflow_words += n_overflow_words
 
         if audio_delay > 0 and not skip:
-            dsu_ids_list_with_delay, ts_ids = add_audio_delay(
+            dsu_ids_list_with_delay, ts_ids, event_ids = add_audio_delay(
                 tokenizer,
                 audio_delay,
                 audio_delay_id,
                 dsu_ids_list,
                 ts_ids,
+                event_ids,
             )
         skip_examples.append(skip)
         text_stream_ids_list.append(ts_ids)
+        event_ids_list.append(event_ids)
 
     dsu_ids_list = dsu_ids_list_with_delay if audio_delay and not skip else dsu_ids_list
     skip_example = any(skip_examples)
     stacked_ts_ids = (
         np.stack(text_stream_ids_list, axis=0) if not skip_example else None
     )
+    stacked_event_ids = (
+        np.stack(event_ids_list, axis=0) if not skip_example else None
+    )
 
-    return dsu_ids_list, stacked_ts_ids, skip_example, total_overflow_words
+    return (
+        dsu_ids_list,
+        stacked_ts_ids,
+        stacked_event_ids,
+        skip_example,
+        total_overflow_words,
+    )

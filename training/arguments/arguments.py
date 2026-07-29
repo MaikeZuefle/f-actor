@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 
@@ -18,6 +18,11 @@ class ModelArgs:
     text_padding_weight: float = 1.0
     use_depth_decoder: bool = False
     depth_decoder_pretrained_path: str = "sesame/csm-1b"
+    use_event_head: bool = False
+    event_focal_gamma: float = 2.0
+    # per-class focal-loss alpha, ordered [none, epad, bc, interrupt, eou];
+    # None (the default) falls back to uniform weighting in DSUModel.__init__.
+    event_focal_alpha: Optional[list] = field(default=None)
 
     def __post_init__(self):
         if self.text_stream and self.multi_text_stream:

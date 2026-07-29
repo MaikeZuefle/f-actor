@@ -28,6 +28,7 @@ def load_speech_data(
     num_dsus = model_args.num_dsus
     text_stream = model_args.text_stream
     multi_text_stream = model_args.multi_text_stream
+    use_event_head = model_args.use_event_head
 
     def tokenize_speech(example):
         n_overflow_words = 0
@@ -46,7 +47,7 @@ def load_speech_data(
 
         if text_stream or multi_text_stream:
 
-            dsu_ids_list, stacked_ts_ids, skip_example, n_overflow_words = (
+            dsu_ids_list, stacked_ts_ids, stacked_event_ids, skip_example, n_overflow_words = (
                 adapt_to_text_stream(
                     (
                         multi_text_stream if not inference else True
@@ -106,6 +107,13 @@ def load_speech_data(
                 "dsu_ids": dsu_ids_list,
                 "text_stream_ids": (
                     stacked_ts_ids if text_stream or multi_text_stream else None
+                ),
+                "event_ids": (
+                    # system speaker only (stream index 0, per
+                    # adapt_to_text_stream's ["system", "user"] role order)
+                    stacked_event_ids[:1]
+                    if use_event_head and (text_stream or multi_text_stream)
+                    else None
                 ),
                 "skip_example": skip_example,
                 "n_overflow_words": n_overflow_words,

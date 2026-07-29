@@ -6,6 +6,7 @@ COLUMNS_TO_SELECT = [
     'labels',
     'dsu_ids',
     'text_stream_ids',
+    'event_ids',
     'skip_example',
     'n_overflow_words',
     'spk_emb'
@@ -30,6 +31,7 @@ SKIP_EXAMPLE_DICT_TRAIN = {
     "labels": None,
     "dsu_ids": None,
     "text_stream_ids": None,
+    "event_ids": None,
     "n_overflow_words": None,
     "spk_emb": None,
 }

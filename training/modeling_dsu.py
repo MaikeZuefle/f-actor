@@ -23,6 +23,21 @@ class DSUModel(ModelInitializerLoader):
         self.text_padding_weight = getattr(config, "text_padding_weight", 1.0)
         self.text_padding_ids = []  # set externally once text-stream tokens exist
 
+        # output-only event head: predicts, with no delay, whether the next
+        # system-channel frame is an EPAD/BC/INTERRUPT/EOU marker. Unlike
+        # dsu_head/text_head it is never sampled or fed back into inputs, so
+        # generate() doesn't need to know about it.
+        self.use_event_head = getattr(config, "use_event_head", False)
+        self.num_event_classes = 5  # none, epad, bc, interrupt, eou
+        self.event_head = None  # initialized later in load_dsu_model.py (if use_event_head)
+        self.event_focal_gamma = getattr(config, "event_focal_gamma", 2.0)
+        event_focal_alpha = getattr(config, "event_focal_alpha", None)
+        self.event_focal_alpha = (
+            event_focal_alpha
+            if event_focal_alpha is not None
+            else [1.0] * self.num_event_classes
+        )
+
         self.use_depth_decoder = getattr(config, "use_depth_decoder", False)
         self.depth_decoder_pretrained_path = getattr(
             config, "depth_decoder_pretrained_path", "sesame/csm-1b"
@@ -77,6 +92,7 @@ class DSUModel(ModelInitializerLoader):
         labels=None,
         dsu_ids=None,
         text_stream_ids=None,
+        event_ids=None,
         spk_emb=None,
         inference=False,
         need_loss=True,
@@ -106,11 +122,13 @@ class DSUModel(ModelInitializerLoader):
             prompt_dsu_attention_mask,
             dsu_labels,
             ts_labels,
+            event_labels,
         ) = get_input_embeds_and_labels(
             prompt_ids=input_ids,  # prompt ids
             prompt_att_mask=attention_mask,  # prompt attention_mask
             dsu_ids=dsu_ids,
             text_stream_ids=text_stream_ids,
+            event_ids=event_ids,
             spk_emb=spk_emb,
             inference=inference,
         )
@@ -172,10 +190,13 @@ class DSUModel(ModelInitializerLoader):
         else:
             ts_logits = None
 
-        total_loss, c1_dsu_loss, c1_text_loss = None, None, None
+        if self.use_event_head and event_labels is not None:
+            logits_labels_pairs.append((None, event_labels, "events"))
+
+        total_loss, c1_dsu_loss, c1_text_loss, c1_event_loss = None, None, None, None
 
         if need_loss:
-            total_loss, c1_dsu_loss, c1_text_loss = 0, 0, 0
+            total_loss, c1_dsu_loss, c1_text_loss, c1_event_loss = 0, 0, 0, 0
 
             for logits, labels, loss_type in logits_labels_pairs:
                 labels_padded = F.pad(labels, (0, 1), value=self.pad_token_id)
@@ -195,10 +216,21 @@ class DSUModel(ModelInitializerLoader):
                         logits = self.dsu_head(audio_hidden_padded).view(
                             B, L, self.num_dsu_heads, -1
                         )
+                elif loss_type == "events":
+                    # single-channel head (system speaker only), so reshape
+                    # to the same [B, L, H, V] convention as the other heads
+                    # with H=1, matching how the single-stream text_head
+                    # case reuses outputs.logits.unsqueeze(2) above.
+                    logits = self.event_head(audio_hidden_padded).unsqueeze(2)
 
                 # dsus are already restricted to the first speaker above when
                 # use_depth_decoder, so they must not be halved again here.
-                already_c1_only = loss_type == "dsus" and self.use_depth_decoder
+                # events are single-channel (system only) by construction, so
+                # they must not be halved either.
+                already_c1_only = (
+                    loss_type == "events"
+                    or (loss_type == "dsus" and self.use_depth_decoder)
+                )
 
                 if (
                     not already_c1_only
@@ -221,11 +253,28 @@ class DSUModel(ModelInitializerLoader):
                         weights[labels_shifted == pad_id] *= self.text_padding_weight
 
                 target = torch.where(mask, labels_shifted, torch.zeros_like(labels_shifted))
-                per_token_loss = F.cross_entropy(
-                    logits.reshape(-1, logits.shape[-1]),
-                    target.reshape(-1),
-                    reduction="none",
-                ).view_as(target)
+
+                if loss_type == "events":
+                    # Focal loss instead of plain weighted CE: EPAD/BC/INTERRUPT/EOU
+                    # are rare relative to "none", and controllable decoding needs
+                    # the head to be decisive on them rather than just calibrated
+                    # on average, so down-weight easy/confident "none" frames
+                    # instead of (or in addition to) a flat class weight.
+                    alpha = torch.tensor(
+                        self.event_focal_alpha, device=logits.device, dtype=logits.dtype
+                    )
+                    per_token_loss = self._focal_loss(
+                        logits.reshape(-1, logits.shape[-1]),
+                        target.reshape(-1),
+                        alpha=alpha,
+                        gamma=self.event_focal_gamma,
+                    ).view_as(target)
+                else:
+                    per_token_loss = F.cross_entropy(
+                        logits.reshape(-1, logits.shape[-1]),
+                        target.reshape(-1),
+                        reduction="none",
+                    ).view_as(target)
 
                 per_conversation_loss = (per_token_loss * weights).sum(dim=[1, 2]) / weights.sum(dim=[1, 2]).clamp(min=1)
                 loss = per_conversation_loss.mean()
@@ -235,6 +284,8 @@ class DSUModel(ModelInitializerLoader):
                     c1_dsu_loss += loss
                 elif loss_type == "text":
                     c1_text_loss += loss
+                elif loss_type == "events":
+                    c1_event_loss += loss
                 else:
                     raise NotImplementedError
 
@@ -245,10 +296,25 @@ class DSUModel(ModelInitializerLoader):
             "loss": total_loss,
             "c1_text_loss": c1_text_loss,
             "c1_dsu_loss": c1_dsu_loss,
+            "c1_event_loss": c1_event_loss,
             "ts_logits": ts_logits,
             "past_key_values": past_key_values,
             "audio_hidden_last": audio_hidden_padded[:, -1, :],
         }
+
+    @staticmethod
+    def _focal_loss(logits, target, alpha, gamma):
+        """Multiclass focal loss: -alpha_t * (1 - p_t)^gamma * log(p_t).
+
+        logits: [N, V], target: [N], alpha: [V] per-class weight.
+        Returns per-example loss of shape [N] (unreduced, like F.cross_entropy
+        with reduction="none").
+        """
+        log_probs = F.log_softmax(logits, dim=-1)
+        log_p_t = log_probs.gather(-1, target.unsqueeze(-1)).squeeze(-1)
+        p_t = log_p_t.exp()
+        alpha_t = alpha[target]
+        return -alpha_t * (1 - p_t).pow(gamma) * log_p_t
 
     def check_vocab_bounds(self, prompt_ids, dsu_ids):
         if (prompt_ids >= self.text_vocab_size).any():
@@ -263,6 +329,7 @@ class DSUModel(ModelInitializerLoader):
         prompt_att_mask,
         dsu_ids,
         text_stream_ids=None,
+        event_ids=None,
         spk_emb=None,
         inference=False,
     ):
@@ -297,6 +364,7 @@ class DSUModel(ModelInitializerLoader):
         all_concat_embeds = []
         labels_all_dsu_heads = []
         labels_all_text_streams = []
+        labels_all_events = []
 
         for b in range(B):
             # prompt
@@ -370,6 +438,22 @@ class DSUModel(ModelInitializerLoader):
                 if self.multi_text_stream:  # will have head without prompt
                     labels_all_text_streams.append(text_stream_ids_b)
 
+            # Event labels (output-only, system speaker only, no delay): a
+            # single-channel [T] class-id sequence, frame-aligned with
+            # text_stream_ids/dsu_ids before the generic labels_shifted[..., 1:]
+            # shift in forward() applies the usual next-frame prediction shift.
+            if event_ids is not None:
+                event_ids_b = event_ids[b, 0, :non_pad_len]
+                if not inference:
+                    event_eos = torch.full(
+                        (1,),
+                        self.pad_token_id,
+                        device=event_ids.device,
+                        dtype=event_ids.dtype,
+                    )
+                    event_ids_b = torch.cat([event_ids_b, event_eos], dim=0)
+                labels_all_events.append(event_ids_b)
+
             # Concatenate prompt and DSU embeddings
 
             all_concat_embeds.append(
@@ -405,11 +489,23 @@ class DSUModel(ModelInitializerLoader):
         else:
             labels_all_text_streams = None
 
+        if labels_all_events:
+            # [B, T] -> [B, 1, T], matching the [B, H, L] convention the
+            # generic loss loop in forward() expects (H=1 here).
+            labels_all_events = pad_sequence(
+                labels_all_events,
+                batch_first=True,
+                padding_value=self.pad_token_id,
+            ).unsqueeze(1)
+        else:
+            labels_all_events = None
+
         return (
             padded_batch,
             attention_mask,
             labels_all_dsu_heads,
             labels_all_text_streams,
+            labels_all_events,
         )
 
     def get_input_embeds_and_labels_padded(
@@ -418,6 +514,7 @@ class DSUModel(ModelInitializerLoader):
         prompt_att_mask,
         dsu_ids,
         text_stream_ids=None,
+        event_ids=None,
         spk_emb=None,
         inference=False,
     ):
@@ -451,6 +548,7 @@ class DSUModel(ModelInitializerLoader):
 
         labels_all_dsu_heads = []
         labels_all_text_streams = []
+        labels_all_events = []
         input_components = []
 
         for b in range(B):
@@ -517,6 +615,20 @@ class DSUModel(ModelInitializerLoader):
                     prompt_t = torch.cat([proj_spk_text, prompt_ids_expanded], dim=1)
 
                 labels_all_text_streams.append([prompt_t, text_stream_ids_b])
+
+            # Event labels (output-only, system speaker only, no delay) - see
+            # get_input_embeds_and_labels for the non-padded-inference version.
+            if event_ids is not None:
+                event_ids_b = event_ids[b, 0, :non_pad_len]
+                if not inference:
+                    event_eos = torch.full(
+                        (1,),
+                        self.pad_token_id,
+                        device=event_ids.device,
+                        dtype=event_ids.dtype,
+                    )
+                    event_ids_b = torch.cat([event_ids_b, event_eos], dim=0)
+                labels_all_events.append(event_ids_b)
 
             # Concatenate prompt and DSU embeddings
             input_components.append(
@@ -600,6 +712,20 @@ class DSUModel(ModelInitializerLoader):
         else:
             labels_text_streams = None
 
+        if labels_all_events:
+            # [B, T] -> [B, 1, T], matching the [B, H, L] convention the
+            # generic loss loop in forward() expects (H=1 here). Unlike the
+            # dsu/text streams, event labels have no separate prompt-prefix
+            # segment to concatenate (they only ever cover the audio region).
+            labels_events = pad_sequence(
+                labels_all_events,
+                batch_first=True,
+                padding_value=self.pad_token_id,
+                padding_side="right",
+            ).unsqueeze(1)
+        else:
+            labels_events = None
+
         assert attention_mask.shape[-1] == padded_batch.shape[1]
         if labels_text_streams is not None:
 
@@ -610,6 +736,7 @@ class DSUModel(ModelInitializerLoader):
             attention_mask,
             labels_all_dsu_heads,
             labels_text_streams,
+            labels_events,
         )
 
     @torch.no_grad()
