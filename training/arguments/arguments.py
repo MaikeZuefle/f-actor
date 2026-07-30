@@ -16,6 +16,7 @@ class ModelArgs:
     calc_loss_on_c1_only: bool = False
     first_codebook_weight: float = 1.0
     text_padding_weight: float = 1.0
+    silence_pad_weight: float = 1.0
     use_depth_decoder: bool = False
     depth_decoder_pretrained_path: str = "sesame/csm-1b"
     use_event_head: bool = False

@@ -72,6 +72,7 @@ def load_model(model_args, grad_acc_steps=1, logger=None, inference=False):
     config.calc_loss_on_c1_only = model_args.calc_loss_on_c1_only
     config.first_codebook_weight = model_args.first_codebook_weight
     config.text_padding_weight = model_args.text_padding_weight
+    config.silence_pad_weight = model_args.silence_pad_weight
     config.use_depth_decoder = model_args.use_depth_decoder
     config.depth_decoder_pretrained_path = model_args.depth_decoder_pretrained_path
     config.use_event_head = model_args.use_event_head
@@ -106,8 +107,9 @@ def load_model(model_args, grad_acc_steps=1, logger=None, inference=False):
             logger=logger,
         )
         model.text_padding_ids = tokenizer.convert_tokens_to_ids(
-            [SILENCE_PAD, UTTERANCE_PAD, WORD_PAD, EPAD, EOU]
+            [UTTERANCE_PAD, WORD_PAD]
         )
+        model.silence_pad_ids = tokenizer.convert_tokens_to_ids([SILENCE_PAD])
 
     if model.get_input_embeddings().num_embeddings < len(tokenizer):
         model.resize_token_embeddings(len(tokenizer))

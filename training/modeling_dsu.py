@@ -22,6 +22,8 @@ class DSUModel(ModelInitializerLoader):
         self.first_codebook_weight = getattr(config, "first_codebook_weight", 1.0)
         self.text_padding_weight = getattr(config, "text_padding_weight", 1.0)
         self.text_padding_ids = []  # set externally once text-stream tokens exist
+        self.silence_pad_weight = getattr(config, "silence_pad_weight", 1.0)
+        self.silence_pad_ids = []  # set externally once text-stream tokens exist
 
         # output-only event head: predicts, with no delay, whether the next
         # system-channel frame is an EPAD/BC/INTERRUPT/EOU marker. Unlike
@@ -251,6 +253,8 @@ class DSUModel(ModelInitializerLoader):
                 elif loss_type == "text":
                     for pad_id in self.text_padding_ids:
                         weights[labels_shifted == pad_id] *= self.text_padding_weight
+                    for pad_id in self.silence_pad_ids:
+                        weights[labels_shifted == pad_id] *= self.silence_pad_weight
 
                 target = torch.where(mask, labels_shifted, torch.zeros_like(labels_shifted))
 
