@@ -75,6 +75,9 @@ def load_model(model_args, grad_acc_steps=1, logger=None, inference=False):
     config.silence_pad_weight = model_args.silence_pad_weight
     config.use_depth_decoder = model_args.use_depth_decoder
     config.depth_decoder_pretrained_path = model_args.depth_decoder_pretrained_path
+    config.depth_decoder_unfreeze_after_steps = (
+        model_args.depth_decoder_unfreeze_after_steps
+    )
     config.use_event_head = model_args.use_event_head
     config.event_focal_gamma = model_args.event_focal_gamma
     config.event_focal_alpha = model_args.event_focal_alpha

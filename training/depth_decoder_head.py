@@ -37,7 +37,26 @@ class CsmDepthDecoderHead(nn.Module):
         audio_vocab_size,
         num_dsus,
         pretrained_path="sesame/csm-1b",
+        start_frozen=True,
     ):
+        """
+        start_frozen: if True (default), the pretrained depth decoder's params
+            are requires_grad=False for the whole run - the original,
+            permanently-frozen behavior.
+
+            If False, its params stay requires_grad=True for the whole run
+            instead - deliberately NOT toggled later. DeepSpeed ZeRO stage 1/2
+            flattens every optimizer param group's parameters into one fixed
+            contiguous buffer at initialization, and requires that group's set
+            of trainable params to stay constant for the entire run (toggling
+            requires_grad on a param already handed to a ZeRO optimizer
+            crashes/corrupts state). So "unfreeze after N steps with a smaller
+            LR" (see DepthDecoderLRGateCallback/DSUTrainer in finetune.py) is
+            implemented by keeping requires_grad=True throughout and instead
+            gating that param group's *LR* at 0 until step N - this flag just
+            controls whether that group should exist as trainable from the
+            start.
+        """
         super().__init__()
 
         from transformers import CsmForConditionalGeneration
@@ -78,9 +97,11 @@ class CsmDepthDecoderHead(nn.Module):
                 f"num_codebooks ({depth_config.num_codebooks})."
             )
 
-        for p in self.depth_decoder.parameters():
-            p.requires_grad_(False)
-        self.depth_decoder.eval()
+        self._frozen = start_frozen
+        if start_frozen:
+            for p in self.depth_decoder.parameters():
+                p.requires_grad_(False)
+            self.depth_decoder.eval()
 
         # this repo trains with gradient_checkpointing=True, and Trainer/HF
         # recursively calls gradient_checkpointing_enable() on every nested
@@ -125,7 +146,8 @@ class CsmDepthDecoderHead(nn.Module):
 
     def train(self, mode=True):
         super().train(mode)
-        self.depth_decoder.eval()  # never let Model.train() unfreeze/un-eval the frozen decoder
+        if self._frozen:
+            self.depth_decoder.eval()  # never let Model.train() unfreeze/un-eval the frozen decoder
         return self
 
     def semantic_logits(self, hidden_states):

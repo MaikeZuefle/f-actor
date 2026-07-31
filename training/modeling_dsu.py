@@ -44,6 +44,9 @@ class DSUModel(ModelInitializerLoader):
         self.depth_decoder_pretrained_path = getattr(
             config, "depth_decoder_pretrained_path", "sesame/csm-1b"
         )
+        self.depth_decoder_unfreeze_after_steps = getattr(
+            config, "depth_decoder_unfreeze_after_steps", 0
+        )
         self.depth_decoder_head = None  # initialized later (if use_depth_decoder)
 
         if self.use_depth_decoder and not self.calc_loss_on_c1_only:

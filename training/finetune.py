@@ -46,6 +46,124 @@ class EvalLossLoggerCallback(TrainerCallback):
             )
 
 
+class DepthDecoderLRGateCallback(TrainerCallback):
+    """Keeps the depth decoder's optimizer param group (see
+    DSUTrainer.create_optimizer, always the last group) at lr=0 until
+    global_step reaches unfreeze_after_steps, then leaves it alone so the
+    normal LR scheduler (already tracking that group's own base
+    depth_decoder_lr) takes over.
+
+    This is a deliberate LR-only gate, not a requires_grad toggle: DeepSpeed
+    ZeRO stage 1/2 flattens each optimizer param group's parameters into one
+    fixed contiguous buffer at initialization and requires that group's set of
+    trainable params to stay constant for the whole run (see
+    CsmDepthDecoderHead's start_frozen docstring) - so the depth decoder's
+    params are requires_grad=True from step 0 onward whenever this feature is
+    used, and "frozen until step N" is simulated purely by forcing this
+    group's lr to 0 every step beforehand, overriding whatever the scheduler
+    just computed for it.
+
+    Runs on `on_step_begin` (before that step's optimizer.step()) specifically
+    so it wins against the scheduler's `on_step_end`-adjacent `.step()` call
+    from the previous iteration, which would otherwise silently reactivate a
+    nonzero lr for this group each step.
+
+    Reads/writes `trainer.optimizer` directly rather than the `optimizer`
+    kwarg callbacks receive - that kwarg is CallbackHandler's own copy,
+    snapshotted once at construction time (before create_optimizer ever
+    runs) and never refreshed, so it stays None/stale for the whole run.
+    """
+
+    def __init__(self, trainer, unfreeze_after_steps, logger):
+        self.trainer = trainer
+        self.unfreeze_after_steps = unfreeze_after_steps
+        self.logger = logger
+        self._activated = False
+
+    def on_step_begin(self, args, state, control, **kwargs):
+        if self._activated:
+            return
+        if state.global_step < self.unfreeze_after_steps:
+            self.trainer.optimizer.param_groups[-1]["lr"] = 0.0
+        else:
+            self._activated = True
+            self.logger.info(
+                "Depth decoder optimizer group's LR schedule now active at "
+                f"step {state.global_step}."
+            )
+
+
+class DSUTrainer(Trainer):
+    """Trainer that, when depth_decoder_lr is set, gives depth_decoder_head's
+    pretrained decoder its own optimizer param group at that LR - independent
+    of the main learning_rate - instead of Trainer's default single-LR setup.
+
+    The depth decoder's params are included regardless of requires_grad
+    filtering (unlike the other two groups): whenever depth_decoder_lr is set,
+    CsmDepthDecoderHead was constructed with start_frozen=False, so they're
+    requires_grad=True for the whole run anyway (see its docstring for why -
+    DeepSpeed ZeRO can't tolerate requires_grad changing after the optimizer
+    is built). Actual gating of when this group starts learning is done via
+    DepthDecoderLRGateCallback, not by excluding params here.
+    """
+
+    def __init__(self, *args, depth_decoder_lr=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.depth_decoder_lr = depth_decoder_lr
+
+    def create_optimizer(self):
+        if self.optimizer is not None:
+            return self.optimizer
+
+        opt_model = self.model
+        if not (
+            getattr(opt_model, "use_depth_decoder", False)
+            and self.depth_decoder_lr is not None
+        ):
+            return super().create_optimizer()
+
+        depth_prefix = "depth_decoder_head.depth_decoder."
+        decay_parameters = self.get_decay_parameter_names(opt_model)
+
+        optimizer_grouped_parameters = [
+            {
+                "params": [
+                    p
+                    for n, p in opt_model.named_parameters()
+                    if n in decay_parameters
+                    and p.requires_grad
+                    and not n.startswith(depth_prefix)
+                ],
+                "weight_decay": self.args.weight_decay,
+            },
+            {
+                "params": [
+                    p
+                    for n, p in opt_model.named_parameters()
+                    if n not in decay_parameters
+                    and p.requires_grad
+                    and not n.startswith(depth_prefix)
+                ],
+                "weight_decay": 0.0,
+            },
+            {
+                "params": [
+                    p
+                    for n, p in opt_model.named_parameters()
+                    if n.startswith(depth_prefix)
+                ],
+                "weight_decay": 0.0,
+                "lr": self.depth_decoder_lr,
+            },
+        ]
+
+        optimizer_cls, optimizer_kwargs = self.get_optimizer_cls_and_kwargs(
+            self.args, opt_model
+        )
+        self.optimizer = optimizer_cls(optimizer_grouped_parameters, **optimizer_kwargs)
+        return self.optimizer
+
+
 def train(args, logger):
     logger.info("Welcome to behaviour-sd full-duplex training! :)")
 
@@ -110,21 +228,43 @@ def train(args, logger):
 
     logger.info(f"Saved training config to {config_path}")
     logger.info("Starting training.")
+
+    callbacks = [
+        EarlyStoppingCallback(
+            early_stopping_patience=training_args.early_stopping_patience
+        ),
+        EvalLossLoggerCallback(),
+    ]
+
+    unfreeze_depth_decoder = (
+        model_args.use_depth_decoder
+        and model_args.depth_decoder_unfreeze_after_steps > 0
+    )
+
     # Trainer
-    trainer = Trainer(
+    trainer = DSUTrainer(
         model=model,
         args=hf_training_args,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         processing_class=tokenizer,
         data_collator=data_collator,
-        callbacks=[
-            EarlyStoppingCallback(
-                early_stopping_patience=training_args.early_stopping_patience
-            ),
-            EvalLossLoggerCallback(),
-        ],
+        callbacks=callbacks,
+        depth_decoder_lr=(
+            model_args.depth_decoder_unfreeze_lr if unfreeze_depth_decoder else None
+        ),
     )
+
+    if unfreeze_depth_decoder:
+        # Added after construction (rather than passed into callbacks=) since
+        # it needs a live reference to `trainer` itself - see
+        # DepthDecoderLRGateCallback's docstring for why it can't just use the
+        # `optimizer` kwarg callbacks normally receive.
+        trainer.add_callback(
+            DepthDecoderLRGateCallback(
+                trainer, model_args.depth_decoder_unfreeze_after_steps, logger
+            )
+        )
 
     # Train
     trainer.train()

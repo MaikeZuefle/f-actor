@@ -19,6 +19,12 @@ class ModelArgs:
     silence_pad_weight: float = 1.0
     use_depth_decoder: bool = False
     depth_decoder_pretrained_path: str = "sesame/csm-1b"
+    # 0 (default) = depth decoder stays frozen for the whole run. Set > 0 to
+    # unfreeze it for joint fine-tuning once global_step reaches this value.
+    depth_decoder_unfreeze_after_steps: int = 0
+    # LR applied to the depth decoder's own params once unfrozen (independent
+    # of the main `learning_rate`); ignored while it's still frozen.
+    depth_decoder_unfreeze_lr: float = 1e-5
     use_event_head: bool = False
     event_focal_gamma: float = 2.0
     # per-class focal-loss alpha, ordered [none, epad, bc, interrupt, eou];

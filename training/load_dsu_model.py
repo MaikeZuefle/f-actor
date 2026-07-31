@@ -37,6 +37,7 @@ class ModelInitializerLoader:
             audio_vocab_size=self.audio_vocab_size,
             num_dsus=self.num_dsus,
             pretrained_path=self.depth_decoder_pretrained_path,
+            start_frozen=self.depth_decoder_unfreeze_after_steps <= 0,
         )
 
         if self.checkpoint_has_weights(model_path, "depth_decoder_head.semantic_head"):
