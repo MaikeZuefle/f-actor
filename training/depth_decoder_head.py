@@ -267,7 +267,7 @@ class CsmDepthDecoderHead(nn.Module):
         return torch.cat([semantic_id, acoustic_ids], dim=1)
 
     @torch.no_grad()
-    def _seed(self, context, past_key_values):
+    def _seed(self, context, past_key_values, attention_mask):
         """
         Seed the KV cache with the backbone context as the depth decoder's
         position-0 embedding. Passed via `inputs_embeds=` rather than
@@ -279,18 +279,24 @@ class CsmDepthDecoderHead(nn.Module):
         length-1 call and crash `codebooks_head` on an empty stack) even
         though the resulting single logits row is discarded.
 
-        Returns the updated past_key_values.
+        attention_mask: [B, 1] of ones - the running mask covering every
+        cached position so far (just this one, at seed time).
+
+        Returns the updated (past_key_values, attention_mask).
         """
+        cache_position = torch.zeros(1, dtype=torch.long, device=context.device)
         outputs = self.depth_decoder(
             inputs_embeds=context.unsqueeze(1),
+            attention_mask=attention_mask,
             past_key_values=past_key_values,
             use_cache=True,
             logits_to_keep=1,
+            cache_position=cache_position,
         )
-        return outputs.past_key_values
+        return outputs.past_key_values, attention_mask
 
     @torch.no_grad()
-    def _step(self, input_ids, past_key_values):
+    def _step(self, input_ids, past_key_values, attention_mask):
         """
         One incremental depth-decoder call: exactly one new token in (plus the
         running KV cache), exactly one logits row out. Lets the frozen
@@ -314,15 +320,39 @@ class CsmDepthDecoderHead(nn.Module):
         *real* position at local index 0, which would otherwise be silently
         dropped.
 
-        Returns (next_logits [B, V], updated past_key_values).
+        attention_mask: [B, L_so_far] of ones covering every cached position
+        including this call's new one (the caller extends it by one column
+        before passing it in).
+
+        Passing `cache_position=None` (the model's own default) is NOT safe
+        here: `CsmDepthDecoderForCausalLM.forward` forwards `cache_position`
+        straight into `CsmCodebooksHead.forward`, which uses it to pick this
+        frame's per-codebook output weight (`self.weight[cache_position - 1]`).
+        When `cache_position is None`, that head instead falls back to
+        `self.weight[arange(hidden_states.shape[1])]` - i.e. it assumes the
+        hidden states it was just given start at codebook 0 and are
+        sequential. That fallback is only correct for a full growing-sequence
+        call (this class's old, non-cached `_generate_acoustic_ids`); for a
+        length-1 incremental call it always resolves to codebook 0's weight
+        regardless of the real position, so every step after the first
+        silently reused codebook 0's output head and produced wrong
+        (degenerate/repeating) ids. We must pass the true absolute
+        `cache_position` explicitly so the correct codebook head is selected.
+
+        Returns (next_logits [B, V], updated (past_key_values, attention_mask)).
         """
+        cache_position = past_key_values.get_seq_length() * torch.ones(
+            1, dtype=torch.long, device=input_ids.device
+        )
         outputs = self.depth_decoder(
             input_ids=input_ids,
+            attention_mask=attention_mask,
             past_key_values=past_key_values,
             use_cache=True,
             logits_to_keep=1,
+            cache_position=cache_position,
         )
-        return outputs.logits[:, -1, :], outputs.past_key_values
+        return outputs.logits[:, -1, :], (outputs.past_key_values, attention_mask)
 
     @torch.no_grad()
     def _generate_acoustic_ids(self, hidden_state_last, semantic_id, sample_fn):
@@ -354,12 +384,21 @@ class CsmDepthDecoderHead(nn.Module):
 
         context = self.backbone_adapter(hidden_state_last)  # [B, backbone_hidden]
         past_key_values = DynamicCache()
-        past_key_values = self._seed(context, past_key_values)
+        attention_mask = torch.ones(B, 1, dtype=torch.long, device=device)
+        past_key_values, attention_mask = self._seed(
+            context, past_key_values, attention_mask
+        )
 
         next_id = semantic_id.view(B, 1)
         acoustic_ids = []
         for i in range(self.num_dsus - 1):
-            next_logits, past_key_values = self._step(next_id, past_key_values)
+            attention_mask = torch.cat(
+                [attention_mask, torch.ones(B, 1, dtype=torch.long, device=device)],
+                dim=1,
+            )
+            next_logits, (past_key_values, attention_mask) = self._step(
+                next_id, past_key_values, attention_mask
+            )
             next_id = sample_fn(next_logits).view(B, 1)
             acoustic_ids.append(next_id)
 

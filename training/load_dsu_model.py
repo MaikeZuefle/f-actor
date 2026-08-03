@@ -59,9 +59,31 @@ class ModelInitializerLoader:
             self.depth_decoder_head.backbone_adapter.weight.data.copy_(
                 state_dict["depth_decoder_head.backbone_adapter.weight"]
             )
-            # depth_decoder.* weights are always taken fresh from the pretrained,
-            # frozen checkpoint above - they are never fine-tuned, so there is no
-            # need to load them again from our own training checkpoint.
+
+            # depth_decoder.* weights are usually the pretrained, permanently
+            # frozen ones loaded fresh by CsmDepthDecoderHead's constructor
+            # above and never saved as trained state - but if this checkpoint
+            # was trained with depth_decoder_unfreeze_after_steps > 0 (see
+            # DepthDecoderLRGateCallback in finetune.py), the decoder itself
+            # was fine-tuned and save_pretrained() would have written its
+            # state too. Load it here if present, overwriting the fresh
+            # pretrained copy - checking the checkpoint's own contents rather
+            # than trusting the current run's depth_decoder_unfreeze_after_steps
+            # config, since that flag isn't necessarily re-specified when just
+            # loading a checkpoint for inference/resuming.
+            depth_decoder_prefix = "depth_decoder_head.depth_decoder."
+            depth_decoder_keys = [
+                k for k in state_dict if k.startswith(depth_decoder_prefix)
+            ]
+            if depth_decoder_keys:
+                own_state = self.depth_decoder_head.depth_decoder.state_dict()
+                for key in depth_decoder_keys:
+                    local_key = key[len(depth_decoder_prefix):]
+                    if local_key not in own_state:
+                        raise KeyError(
+                            f"Unexpected depth decoder key '{key}' in checkpoint {model_path}"
+                        )
+                    own_state[local_key].copy_(state_dict[key])
 
         self.depth_decoder_head.to(self.device, dtype=self.dtype)
 
