@@ -25,6 +25,12 @@ class ModelArgs:
     # LR applied to the depth decoder's own params once unfrozen (independent
     # of the main `learning_rate`); ignored while it's still frozen.
     depth_decoder_unfreeze_lr: float = 1e-5
+    # if True, feed the (192-dim) speaker embedding directly into the depth
+    # decoder head at every step (both the semantic head and the acoustic
+    # depth-decoder context), in addition to (not instead of) the existing
+    # `use_speaker_embedding` backbone prompt token. Independent flag so old
+    # checkpoints/configs default to off and are unaffected.
+    depth_decoder_use_speaker_embedding: bool = False
     use_event_head: bool = False
     event_focal_gamma: float = 2.0
     # per-class focal-loss alpha, ordered [none, epad, bc, interrupt, eou];

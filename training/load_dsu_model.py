@@ -31,6 +31,11 @@ class ModelInitializerLoader:
 
         from depth_decoder_head import CsmDepthDecoderHead
 
+        depth_decoder_use_speaker_embedding = getattr(
+            self, "depth_decoder_use_speaker_embedding", False
+        )
+        spk_emb_dim = 192  # matches init_or_load_speaker_embed_proj's convention
+
         self.num_dsu_heads = self.num_dsus
         self.depth_decoder_head = CsmDepthDecoderHead(
             hidden_size=self.hidden_size,
@@ -38,6 +43,8 @@ class ModelInitializerLoader:
             num_dsus=self.num_dsus,
             pretrained_path=self.depth_decoder_pretrained_path,
             start_frozen=self.depth_decoder_unfreeze_after_steps <= 0,
+            use_speaker_embedding=depth_decoder_use_speaker_embedding,
+            speaker_embed_dim=spk_emb_dim if depth_decoder_use_speaker_embedding else None,
         )
 
         if self.checkpoint_has_weights(model_path, "depth_decoder_head.semantic_head"):
@@ -59,6 +66,24 @@ class ModelInitializerLoader:
             self.depth_decoder_head.backbone_adapter.weight.data.copy_(
                 state_dict["depth_decoder_head.backbone_adapter.weight"]
             )
+
+            # Optional - only present in checkpoints saved with
+            # depth_decoder_use_speaker_embedding=True. Load if present
+            # (regardless of the current run's flag value, mirroring the
+            # depth_decoder.* handling below); otherwise the freshly
+            # initialized adapters from the constructor above are kept.
+            if depth_decoder_use_speaker_embedding:
+                for attr, key in [
+                    ("acoustic_speaker_adapter", "depth_decoder_head.acoustic_speaker_adapter.weight"),
+                    (
+                        "semantic_speaker_adapter",
+                        "depth_decoder_head.semantic_speaker_adapter.weight",
+                    ),
+                ]:
+                    if key in state_dict:
+                        getattr(self.depth_decoder_head, attr).weight.data.copy_(
+                            state_dict[key]
+                        )
 
             # depth_decoder.* weights are usually the pretrained, permanently
             # frozen ones loaded fresh by CsmDepthDecoderHead's constructor

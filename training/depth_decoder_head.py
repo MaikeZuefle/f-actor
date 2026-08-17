@@ -38,6 +38,8 @@ class CsmDepthDecoderHead(nn.Module):
         num_dsus,
         pretrained_path="sesame/csm-1b",
         start_frozen=True,
+        use_speaker_embedding=False,
+        speaker_embed_dim=None,
     ):
         """
         start_frozen: if True (default), the pretrained depth decoder's params
@@ -119,6 +121,31 @@ class CsmDepthDecoderHead(nn.Module):
             hidden_size, depth_config.backbone_hidden_size, bias=False
         )
 
+        # Optional direct speaker-embedding conditioning (independent of - and
+        # in addition to - DSUModel's own `use_speaker_embedding` backbone
+        # prompt token). Two separate adapters since they feed different
+        # spaces: `acoustic_speaker_adapter` adds into the depth decoder's backbone
+        # context (affects acoustic codebooks 1..num_dsus-1), and
+        # `semantic_speaker_adapter` adds into the backbone hidden state
+        # before `semantic_head` (affects codebook 0). Only constructed when
+        # enabled, so old checkpoints without these weights load unaffected.
+        self.use_speaker_embedding = use_speaker_embedding
+        if use_speaker_embedding:
+            self.acoustic_speaker_adapter = nn.Linear(
+                speaker_embed_dim, depth_config.backbone_hidden_size, bias=False
+            )
+            self.semantic_speaker_adapter = nn.Linear(
+                speaker_embed_dim, hidden_size, bias=False
+            )
+            # Zero-init so both adapters start as an exact no-op: they're
+            # added on top of paths (backbone_adapter's output into the
+            # frozen pretrained depth decoder; hidden_states into
+            # semantic_head) that must otherwise keep working unperturbed at
+            # step 0, unlike backbone_adapter itself, which is trained from
+            # scratch anyway.
+            nn.init.zeros_(self.acoustic_speaker_adapter.weight)
+            nn.init.zeros_(self.semantic_speaker_adapter.weight)
+
     def _build_inputs_embeds(self, input_ids, context):
         """
         Replicates CsmDepthDecoderModel.forward's own
@@ -150,10 +177,27 @@ class CsmDepthDecoderHead(nn.Module):
             self.depth_decoder.eval()  # never let Model.train() unfreeze/un-eval the frozen decoder
         return self
 
-    def semantic_logits(self, hidden_states):
-        return self.semantic_head(hidden_states)  # [B, L, V]
+    def semantic_logits(self, hidden_states, spk_emb=None):
+        """
+        hidden_states: [B, L, hidden_size] or [B, hidden_size].
+        spk_emb: [B, speaker_embed_dim], added (broadcast over L if present)
+            when `use_speaker_embedding` is set; ignored otherwise.
+        """
+        if self.use_speaker_embedding and spk_emb is not None:
+            proj = self.semantic_speaker_adapter(spk_emb)  # [B, hidden_size]
+            if hidden_states.dim() == 3:
+                proj = proj.unsqueeze(1)  # [B, 1, hidden_size], broadcasts over L
+            hidden_states = hidden_states + proj
+        return self.semantic_head(hidden_states)  # [..., V]
 
-    def forward(self, hidden_states, dsu_labels):
+    def _speaker_context(self, spk_emb):
+        """Projects spk_emb into backbone_hidden_size for the acoustic path, or
+        returns 0 if disabled/unavailable (safe to add unconditionally)."""
+        if self.use_speaker_embedding and spk_emb is not None:
+            return self.acoustic_speaker_adapter(spk_emb)
+        return 0
+
+    def forward(self, hidden_states, dsu_labels, spk_emb=None):
         """
         Teacher-forced training/eval path, first speaker only. Only meant to be
         called when a loss is actually needed - see `generate()` for the
@@ -171,6 +215,9 @@ class CsmDepthDecoderHead(nn.Module):
             unshifted per-frame labels here would condition each prediction on
             the wrong frame's codebooks.
 
+        spk_emb: [B, speaker_embed_dim] optional, only used when
+            `use_speaker_embedding` is set - see class docstring.
+
         Returns logits of shape [B, L, num_dsus, audio_vocab_size], drop-in
         compatible with the existing `dsu_head(...).view(...)` output (restricted
         to the first speaker) so the rest of the loss computation in
@@ -182,7 +229,7 @@ class CsmDepthDecoderHead(nn.Module):
             f"speaker only), got {dsu_labels.shape[1]}"
         )
 
-        semantic_logits = self.semantic_logits(hidden_states)  # [B, L, V]
+        semantic_logits = self.semantic_logits(hidden_states, spk_emb)  # [B, L, V]
 
         if self.num_dsus > 1:
             # batch/end-of-sequence padding ids (e.g. the tokenizer's pad/eos id, a
@@ -208,6 +255,11 @@ class CsmDepthDecoderHead(nn.Module):
             )
 
             projected = self.backbone_adapter(hidden_states)  # [B, L, backbone_hidden]
+            if self.use_speaker_embedding and spk_emb is not None:
+                # spk_emb is [B, dim], per-frame context is [B, L, backbone_hidden] -
+                # broadcast the (per-example, not per-frame) speaker adapter output
+                # over L before flattening to match `projected`.
+                projected = projected + self.acoustic_speaker_adapter(spk_emb).unsqueeze(1)
             context = projected.reshape(B * L, -1)
 
             # position 0 = placeholder (overwritten by the hidden state below, and
@@ -241,7 +293,7 @@ class CsmDepthDecoderHead(nn.Module):
         return dsu_logits
 
     @torch.no_grad()
-    def generate(self, hidden_state_last, sample_fn):
+    def generate(self, hidden_state_last, sample_fn, spk_emb=None):
         """
         Inference-time path for one frame, first speaker only: samples ALL
         `num_dsus` codebooks - first the semantic (codebook 0) id via
@@ -252,17 +304,19 @@ class CsmDepthDecoderHead(nn.Module):
         hidden_state_last: [B, hidden_size] backbone hidden state for this frame.
         sample_fn: callable(logits) -> next_token_ids, e.g. wrapping
             DSUModel.get_next_tokens with the desired sampling params.
+        spk_emb: [B, speaker_embed_dim] optional, only used when
+            `use_speaker_embedding` is set - see class docstring.
 
         Returns ids of shape [B, num_dsus].
         """
-        semantic_logits = self.semantic_logits(hidden_state_last)  # [B, V]
+        semantic_logits = self.semantic_logits(hidden_state_last, spk_emb)  # [B, V]
         semantic_id = sample_fn(semantic_logits).view(-1, 1)  # [B, 1]
 
         if self.num_dsus <= 1:
             return semantic_id
 
         acoustic_ids = self._generate_acoustic_ids(
-            hidden_state_last, semantic_id.squeeze(1), sample_fn
+            hidden_state_last, semantic_id.squeeze(1), sample_fn, spk_emb
         )
         return torch.cat([semantic_id, acoustic_ids], dim=1)
 
@@ -355,7 +409,9 @@ class CsmDepthDecoderHead(nn.Module):
         return outputs.logits[:, -1, :], (outputs.past_key_values, attention_mask)
 
     @torch.no_grad()
-    def _generate_acoustic_ids(self, hidden_state_last, semantic_id, sample_fn):
+    def _generate_acoustic_ids(
+        self, hidden_state_last, semantic_id, sample_fn, spk_emb=None
+    ):
         """
         Autoregressively sample the acoustic codebooks 1..num_dsus-1 from the
         frozen depth decoder, conditioned on the backbone hidden state and the
@@ -373,6 +429,8 @@ class CsmDepthDecoderHead(nn.Module):
         hidden_state_last: [B, hidden_size] backbone hidden state for this frame.
         semantic_id: [B] (or [B, 1]) already-sampled codebook-0 id.
         sample_fn: callable(logits) -> next_token_ids.
+        spk_emb: [B, speaker_embed_dim] optional, only used when
+            `use_speaker_embedding` is set - see class docstring.
 
         Returns acoustic ids of shape [B, num_dsus - 1].
         """
@@ -383,6 +441,7 @@ class CsmDepthDecoderHead(nn.Module):
             return torch.zeros(B, 0, dtype=torch.long, device=device)
 
         context = self.backbone_adapter(hidden_state_last)  # [B, backbone_hidden]
+        context = context + self._speaker_context(spk_emb)
         past_key_values = DynamicCache()
         attention_mask = torch.ones(B, 1, dtype=torch.long, device=device)
         past_key_values, attention_mask = self._seed(

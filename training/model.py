@@ -78,6 +78,9 @@ def load_model(model_args, grad_acc_steps=1, logger=None, inference=False):
     config.depth_decoder_unfreeze_after_steps = (
         model_args.depth_decoder_unfreeze_after_steps
     )
+    config.depth_decoder_use_speaker_embedding = (
+        model_args.depth_decoder_use_speaker_embedding
+    )
     config.use_event_head = model_args.use_event_head
     config.event_focal_gamma = model_args.event_focal_gamma
     config.event_focal_alpha = model_args.event_focal_alpha

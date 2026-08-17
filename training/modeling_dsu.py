@@ -47,6 +47,9 @@ class DSUModel(ModelInitializerLoader):
         self.depth_decoder_unfreeze_after_steps = getattr(
             config, "depth_decoder_unfreeze_after_steps", 0
         )
+        self.depth_decoder_use_speaker_embedding = getattr(
+            config, "depth_decoder_use_speaker_embedding", False
+        )
         self.depth_decoder_head = None  # initialized later (if use_depth_decoder)
 
         if self.use_depth_decoder and not self.calc_loss_on_c1_only:
@@ -215,7 +218,9 @@ class DSUModel(ModelInitializerLoader):
                         # so restrict its teacher-forcing input to those.
                         labels_shifted = labels_shifted[:, : self.num_dsus, :]
                         logits = self.depth_decoder_head(
-                            audio_hidden_padded, labels_shifted
+                            audio_hidden_padded,
+                            labels_shifted,
+                            spk_emb=self._depth_decoder_spk_emb(spk_emb, B),
                         )
                     else:
                         logits = self.dsu_head(audio_hidden_padded).view(
@@ -802,8 +807,29 @@ class DSUModel(ModelInitializerLoader):
             next_tokens = torch.argmax(next_token_logits, dim=-1)  # [B, H] if DSU
         return next_tokens
 
+    def _depth_decoder_spk_emb(self, spk_emb, B):
+        """
+        Builds the [B, speaker_embed_dim] tensor the depth decoder head's
+        optional direct speaker conditioning expects, from the same raw
+        `spk_emb` (list of length B, one array per example) DSUModel already
+        receives for the backbone prompt token. Returns None when disabled or
+        unavailable, so callers can pass it through unconditionally.
+        """
+        if not self.depth_decoder_use_speaker_embedding or spk_emb is None:
+            return None
+        assert B == len(spk_emb)
+        return torch.stack(
+            [
+                torch.tensor(spk_emb[b], device=self.model.device, dtype=self.model.dtype)
+                for b in range(B)
+            ],
+            dim=0,
+        )
+
     @torch.no_grad()
-    def sample_dsu_tokens(self, outputs, do_sample, temperature, top_k, top_p):
+    def sample_dsu_tokens(
+        self, outputs, do_sample, temperature, top_k, top_p, spk_emb=None
+    ):
         """
         Sample this step's dsu ids from a forward() call made with need_loss=False.
         Head-agnostic: dispatches to the frozen depth decoder's own generate()
@@ -817,7 +843,12 @@ class DSUModel(ModelInitializerLoader):
             logits.shape[0], logits, do_sample, temperature, top_k, top_p
         )
         if self.use_depth_decoder:
-            return self.depth_decoder_head.generate(hidden_state_last, sample_fn)
+            depth_spk_emb = self._depth_decoder_spk_emb(
+                spk_emb, hidden_state_last.shape[0]
+            )
+            return self.depth_decoder_head.generate(
+                hidden_state_last, sample_fn, spk_emb=depth_spk_emb
+            )
 
         dsu_logits = self.dsu_head(hidden_state_last).view(
             hidden_state_last.shape[0], self.num_dsu_heads, -1
@@ -950,7 +981,7 @@ class DSUModel(ModelInitializerLoader):
 
             if step >= n_delay_audio_stream:
                 generated_dsu[:, :self.num_dsus, step] = self.sample_dsu_tokens(
-                    outputs, do_sample, temperature, top_k, top_p
+                    outputs, do_sample, temperature, top_k, top_p, spk_emb=spk_emb
                 )
             else:
                 generated_dsu[:, :, step] = self.audio_delay_id
