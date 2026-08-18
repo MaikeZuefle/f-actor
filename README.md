@@ -1,6 +1,6 @@
 # F-Actor: Controllable Conversational Behavior in Full-Duplex Models
 
-[![arXiv](https://img.shields.io/badge/arXiv-2601.11329-b31b1b.svg)](https://arxiv.org/abs/2601.11329)
+[![ACL Anthology](https://img.shields.io/badge/ACL%20Anthology-2026.findings--acl.242-b31b1b.svg)](https://aclanthology.org/2026.findings-acl.242/)
 [![Hugging Face Model](https://img.shields.io/badge/🤗%20Hugging%20Face-Models-yellow)](https://huggingface.co/maikezu/f-actor)
 [![Hugging Face Dataset](https://img.shields.io/badge/🤗%20Hugging%20Face-Dataset-orange)](https://huggingface.co/datasets/maikezu/f-actor-behavior-sd-nanocodec)
 [![Hugging Face Dataset](https://img.shields.io/badge/🤗%20Hugging%20Face-Dataset-orange)](https://huggingface.co/datasets/maikezu/f-actor-behavior-sd-mimi)
@@ -11,7 +11,7 @@
 ## Overview
 
 This repository contains the code accompanying the paper
-**[F-Actor: Controllable Conversational Behaviour in Full-Duplex Models](https://arxiv.org/abs/2601.11329)**.
+**[F-Actor: Controllable Conversational Behaviour in Full-Duplex Models](https://aclanthology.org/2026.findings-acl.242/)**.
 
 Spoken conversational systems require more than accurate speech generation to have human-like conversations: to feel natural and engaging, they must produce conversational behaviour that adapts dynamically to the context. Current spoken conversational systems, however, rarely allow such customization, limiting their naturalness and usability. In this work, we present the first open, instruction-following full-duplex conversational speech model that can be trained efficiently under typical academic resource constraints. By keeping the audio encoder frozen and finetuning only the language model, our model requires just 2,000 hours of data, without relying on large-scale pretraining or multi-stage optimization. The model can follow explicit instructions to control speaker voice, conversation topic, conversational behaviour (e.g., backchanneling and interruptions), and dialogue initiation. We propose a single-stage training protocol and systematically analyze design choices. Both the model and training code will be released to enable reproducible research on controllable full-duplex speech systems.
 
@@ -112,13 +112,26 @@ Example dialogues generated with F-Actor can be found in the [`example_dialogues
 If you use this work, please cite:
 
 ```bibtex
-@misc{züfle2026factorcontrollableconversationalbehaviour,
-      title={F-Actor: Controllable Conversational Behaviour in Full-Duplex Models},
-      author={Maike Züfle and Ondrej Klejch and Nicholas Sanders and Jan Niehues and Alexandra Birch and Tsz Kin Lam},
-      year={2026},
-      eprint={2601.11329},
-      archivePrefix={arXiv},
-      primaryClass={cs.CL},
-      url={https://arxiv.org/abs/2601.11329},
+@inproceedings{zufle-etal-2026-f,
+    title = "{F}-Actor: Controllable Conversational Behavior in Full-Duplex Models",
+    author = {Z{\"u}fle, Maike  and
+      Klejch, Ondrej  and
+      Sanders, Nicholas  and
+      Niehues, Jan  and
+      Birch, Alexandra  and
+      Lam, Tsz Kin},
+    editor = "Liakata, Maria  and
+      Moreira, Viviane P.  and
+      Zhang, Jiajun  and
+      Jurgens, David",
+    booktitle = "Findings of the {A}ssociation for {C}omputational {L}inguistics: {ACL} 2026",
+    month = jul,
+    year = "2026",
+    address = "San Diego, California, United States",
+    publisher = "Association for Computational Linguistics",
+    url = "https://aclanthology.org/2026.findings-acl.242/",
+    doi = "10.18653/v1/2026.findings-acl.242",
+    pages = "4904--4921",
+    ISBN = "979-8-89176-395-1",
 }
 ```
