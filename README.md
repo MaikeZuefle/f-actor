@@ -81,25 +81,29 @@ To run the same evaluation metrics as reported in the paper:
 ## Generate Your Own Dialogues
 You can generate custom dialogues using the script
 [`training/inference_example.py`](training/inference_example.py).
-Before running the script, configure the following options at the bottom of the file:
+The dialogue is configured via a JSON file
+([`confs/example_dialogue.json`](confs/example_dialogue.json) by default),
+with the following options per speaker:
 
-- **Speaker selection** (determines the voice used for each character)
+- **`name`** (determines the voice used for each character)
   - Four example speaker voices from the original Behaviour-SD are provided below.
     Select any two of these voices for your dialogue.
     - **Tom** [`tom.wav`](training/example_speakers/tom.wav)
     - **Brian** [`brian.wav`](training/example_speakers/brian.wav)
     - **Gweneth** [`gweneth.wav`](training/example_speakers/gweneth.wav)
     - **Rebeka** [`rebeka.wav`](training/example_speakers/rebeka.wav)
-- **Starting speaker** (which speaker begins the conversation)
-- **Narrative context** (background or setup for the dialogue)
+- **`narrative`** (background or setup for the dialogue; each speaker only sees their own)
+- **`starts`** (which speaker begins the conversation)
+- **`backchannels`** / **`interruptions`** (behavior instruction counts)
 
-An example can be found in
-[`training/inference_example.py`](training/inference_example.py).
+plus top-level `output_file`, `max_length`, and sampling parameters
+(`temperature`, `top_k`, `top_p`). The generated transcripts of both speakers
+are printed at the end.
 
 To run the script, use:
 
 ```bash
-python training/inference_example.py
+python training/inference_example.py [--config path/to/my_dialogue.json]
 ```
 
 
