@@ -1,0 +1,47 @@
+F-Actor
+Copyright 2026 F-Actor Authors
+
+This product includes software developed as part of the F-Actor project
+(https://github.com/MaikeZuefle/f-actor).
+
+This project incorporates or depends on the following third-party materials.
+Their respective license terms apply in addition to, and take precedence
+over, the Apache License 2.0 covering this repository's own code where
+those third-party materials are concerned.
+
+--------------------------------------------------------------------------
+1. Llama 3.2
+--------------------------------------------------------------------------
+"Llama 3.2 is licensed under the Llama 3.2 Community License,
+Copyright © Meta Platforms, Inc. All Rights Reserved."
+
+License:               https://www.llama.com/llama3_2/license/
+Acceptable Use Policy: https://www.llama.com/llama3_2/use-policy
+
+The F-Actor model is fine-tuned on top of Llama-3.2-1B
+(https://huggingface.co/meta-llama/Llama-3.2-1B). Only the
+projector/adapter component is trained; released checkpoints that include
+or require Llama 3.2 weights are Llama Materials derivatives and are
+distributed under the Llama 3.2 Community License, not under the Apache
+License 2.0 that covers this repository's code.
+
+This project is built with Llama.
+
+--------------------------------------------------------------------------
+2. NVIDIA NeMo NanoCodec
+--------------------------------------------------------------------------
+"Licensed by NVIDIA Corporation under the NVIDIA Open Model License
+Agreement."
+
+License: https://developer.download.nvidia.com/licenses/nvidia-open-model-license-agreement-june-2024.pdf
+Model:   https://huggingface.co/nvidia/nemo-nano-codec-22khz-0.6kbps-12.5fps
+
+The F-Actor audio encoder is frozen and used as provided by NVIDIA under
+the above license; F-Actor does not modify the NanoCodec weights.
+
+--------------------------------------------------------------------------
+
+The contents of this NOTICE file are provided for informational and
+attribution purposes only and do not modify or supersede the terms of
+any license referenced herein. Please consult the linked license texts
+for the authoritative and complete terms.
