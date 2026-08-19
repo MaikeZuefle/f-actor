@@ -127,8 +127,8 @@ def generate_outputs(
 
     make_lists = lambda n: [[] for _ in range(max(1, n))]
     num_output_texts = 2 if (talk_to_itself or model.num_text_streams == 2) else 1
-    all_generated_texts = make_lists(model.num_dsu_heads)
-    all_reference_texts = make_lists(model.num_dsu_heads)
+    all_generated_texts = make_lists(model.num_dsus * 2)
+    all_reference_texts = make_lists(model.num_dsus * 2)
     generated_text_streams = make_lists(num_output_texts)
     ref_text_streams = make_lists(num_output_texts)
 
@@ -200,7 +200,7 @@ def generate_outputs(
         if model.num_dsus > 0:
             generated_dsu_ids, generated_text_ids = generated_ids
 
-            for head_idx in range(model.num_dsu_heads):
+            for head_idx in range(len(generated_dsu_ids)):
                 gen_dsus = generated_dsu_ids[head_idx][n_delay_audio_stream:]
 
                 all_generated_texts[head_idx].append(gen_dsus)

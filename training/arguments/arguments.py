@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 
@@ -14,6 +14,28 @@ class ModelArgs:
     audio_vocab_size: int = 4032
     use_speaker_embedding: bool = False
     calc_loss_on_c1_only: bool = False
+    first_codebook_weight: float = 1.0
+    text_padding_weight: float = 1.0
+    silence_pad_weight: float = 1.0
+    use_depth_decoder: bool = False
+    depth_decoder_pretrained_path: str = "sesame/csm-1b"
+    # 0 (default) = depth decoder stays frozen for the whole run. Set > 0 to
+    # unfreeze it for joint fine-tuning once global_step reaches this value.
+    depth_decoder_unfreeze_after_steps: int = 0
+    # LR applied to the depth decoder's own params once unfrozen (independent
+    # of the main `learning_rate`); ignored while it's still frozen.
+    depth_decoder_unfreeze_lr: float = 1e-5
+    # if True, feed the (192-dim) speaker embedding directly into the depth
+    # decoder head at every step (both the semantic head and the acoustic
+    # depth-decoder context), in addition to (not instead of) the existing
+    # `use_speaker_embedding` backbone prompt token. Independent flag so old
+    # checkpoints/configs default to off and are unaffected.
+    depth_decoder_use_speaker_embedding: bool = False
+    use_event_head: bool = False
+    event_focal_gamma: float = 2.0
+    # per-class focal-loss alpha, ordered [none, epad, bc, interrupt, eou];
+    # None (the default) falls back to uniform weighting in DSUModel.__init__.
+    event_focal_alpha: Optional[list] = field(default=None)
 
     def __post_init__(self):
         if self.text_stream and self.multi_text_stream:
@@ -25,6 +47,9 @@ class ModelArgs:
 # Data arguments
 @dataclass
 class DataArgs:
+    # One or more HF dataset repos, comma-separated (e.g. "org/ds1,org/ds2").
+    # Only the first dataset's "validation" split is used for eval; all
+    # datasets' "train" splits are concatenated for training.
     speech_path: Optional[str] = None
     train_on_subset: Optional[float] = None
     n_delay_text_stream: int = 0
@@ -32,19 +57,12 @@ class DataArgs:
     word_alignment: bool = False
     add_bc_token: bool = False
     add_interrupt_token: bool = False
-    add_counting_tokens: bool = False
+    add_epad_token: bool = False
+    add_eou_token: bool = False
     debug: bool = False
     use_system_narrative: bool = False
     remove_start_silence: bool = False
     preprocessing_num_workers: Optional[int] = None
-
-    def __post_init__(self):
-        if (self.add_bc_token and self.add_counting_tokens) or (
-            self.add_interrupt_token and self.add_counting_tokens
-        ):
-            raise ValueError(
-                "add_counting_tokens cannot be set together with add_bc_token/add_interrupt_token."
-            )
 
 
 # Training arguments

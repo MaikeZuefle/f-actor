@@ -25,6 +25,93 @@ class ModelInitializerLoader:
         else:
             self.init_audio_embeds()
 
+    def init_or_load_depth_decoder_head(self, model_path=None):
+        if self.num_dsus < 1:
+            return
+
+        from depth_decoder_head import CsmDepthDecoderHead
+
+        depth_decoder_use_speaker_embedding = getattr(
+            self, "depth_decoder_use_speaker_embedding", False
+        )
+        spk_emb_dim = 192  # matches init_or_load_speaker_embed_proj's convention
+
+        self.num_dsu_heads = self.num_dsus
+        self.depth_decoder_head = CsmDepthDecoderHead(
+            hidden_size=self.hidden_size,
+            audio_vocab_size=self.audio_vocab_size,
+            num_dsus=self.num_dsus,
+            pretrained_path=self.depth_decoder_pretrained_path,
+            start_frozen=self.depth_decoder_unfreeze_after_steps <= 0,
+            use_speaker_embedding=depth_decoder_use_speaker_embedding,
+            speaker_embed_dim=spk_emb_dim if depth_decoder_use_speaker_embedding else None,
+        )
+
+        if self.checkpoint_has_weights(model_path, "depth_decoder_head.semantic_head"):
+            state_dict = self.load_safetensors_state_dict(model_path)
+            for key in [
+                "depth_decoder_head.semantic_head.weight",
+                "depth_decoder_head.semantic_head.bias",
+                "depth_decoder_head.backbone_adapter.weight",
+            ]:
+                if key not in state_dict:
+                    raise KeyError(f"Missing key '{key}' in checkpoint {model_path}")
+
+            self.depth_decoder_head.semantic_head.weight.data.copy_(
+                state_dict["depth_decoder_head.semantic_head.weight"]
+            )
+            self.depth_decoder_head.semantic_head.bias.data.copy_(
+                state_dict["depth_decoder_head.semantic_head.bias"]
+            )
+            self.depth_decoder_head.backbone_adapter.weight.data.copy_(
+                state_dict["depth_decoder_head.backbone_adapter.weight"]
+            )
+
+            # Optional - only present in checkpoints saved with
+            # depth_decoder_use_speaker_embedding=True. Load if present
+            # (regardless of the current run's flag value, mirroring the
+            # depth_decoder.* handling below); otherwise the freshly
+            # initialized adapters from the constructor above are kept.
+            if depth_decoder_use_speaker_embedding:
+                for attr, key in [
+                    ("acoustic_speaker_adapter", "depth_decoder_head.acoustic_speaker_adapter.weight"),
+                    (
+                        "semantic_speaker_adapter",
+                        "depth_decoder_head.semantic_speaker_adapter.weight",
+                    ),
+                ]:
+                    if key in state_dict:
+                        getattr(self.depth_decoder_head, attr).weight.data.copy_(
+                            state_dict[key]
+                        )
+
+            # depth_decoder.* weights are usually the pretrained, permanently
+            # frozen ones loaded fresh by CsmDepthDecoderHead's constructor
+            # above and never saved as trained state - but if this checkpoint
+            # was trained with depth_decoder_unfreeze_after_steps > 0 (see
+            # DepthDecoderLRGateCallback in finetune.py), the decoder itself
+            # was fine-tuned and save_pretrained() would have written its
+            # state too. Load it here if present, overwriting the fresh
+            # pretrained copy - checking the checkpoint's own contents rather
+            # than trusting the current run's depth_decoder_unfreeze_after_steps
+            # config, since that flag isn't necessarily re-specified when just
+            # loading a checkpoint for inference/resuming.
+            depth_decoder_prefix = "depth_decoder_head.depth_decoder."
+            depth_decoder_keys = [
+                k for k in state_dict if k.startswith(depth_decoder_prefix)
+            ]
+            if depth_decoder_keys:
+                own_state = self.depth_decoder_head.depth_decoder.state_dict()
+                for key in depth_decoder_keys:
+                    local_key = key[len(depth_decoder_prefix):]
+                    if local_key not in own_state:
+                        raise KeyError(
+                            f"Unexpected depth decoder key '{key}' in checkpoint {model_path}"
+                        )
+                    own_state[local_key].copy_(state_dict[key])
+
+        self.depth_decoder_head.to(self.device, dtype=self.dtype)
+
     def init_or_load_text_heads(self, model_path=None):
         if not self.multi_text_stream:
             return
@@ -33,6 +120,15 @@ class ModelInitializerLoader:
             self.load_text_heads(model_path)
         else:
             self.init_text_heads()
+
+    def init_or_load_event_head(self, model_path=None):
+        if not self.use_event_head:
+            return
+
+        if self.checkpoint_has_weights(model_path, "event_head.weight"):
+            self.load_event_head(model_path)
+        else:
+            self.init_event_head()
 
     def init_or_load_speaker_embed_proj(self, model_path=None):
         """
@@ -97,7 +193,9 @@ class ModelInitializerLoader:
 
         self.text_head = torch.nn.ModuleList(
             [
-                torch.nn.Linear(self.hidden_size, self.text_vocab_size).to(self.device)
+                torch.nn.Linear(self.hidden_size, self.text_vocab_size).to(
+                    self.device, dtype=self.dtype
+                )
                 for _ in range(self.num_text_heads)
             ]
         )
@@ -106,12 +204,24 @@ class ModelInitializerLoader:
             torch.nn.init.xavier_uniform_(head.weight)
             torch.nn.init.zeros_(head.bias)
 
+    def init_event_head(self):
+        """Create the output-only event head."""
+        if not self.use_event_head:
+            return
+
+        self.event_head = torch.nn.Linear(
+            self.hidden_size, self.num_event_classes
+        ).to(self.device, dtype=self.dtype)
+
+        torch.nn.init.xavier_uniform_(self.event_head.weight)
+        torch.nn.init.zeros_(self.event_head.bias)
+
     def init_audio_embeds(self):
         """Initialize Audio embedding layers"""
         if self.num_dsus < 1:
             return
 
-        self.num_audio_embeds = self.num_dsu_heads
+        self.num_audio_embeds = self.num_dsus * 2
 
         # One embedding table per head
         self.audio_embeds = torch.nn.ModuleList(
@@ -133,7 +243,7 @@ class ModelInitializerLoader:
         Initialize a linear projection from speaker embedding dimension to hidden size.
         """
         self.speaker_embed_proj = torch.nn.Linear(spk_emb_dim, self.hidden_size).to(
-            self.device
+            self.device, dtype=self.dtype
         )
         torch.nn.init.xavier_uniform_(self.speaker_embed_proj.weight)
         torch.nn.init.zeros_(self.speaker_embed_proj.bias)
@@ -186,7 +296,7 @@ class ModelInitializerLoader:
         # Copy weights into the DSU head
         self.dsu_head.weight.data.copy_(pretrained_weight)
         self.dsu_head.bias.data.copy_(pretrained_bias)
-        self.dsu_head.to(self.device)
+        self.dsu_head.to(self.device, dtype=self.dtype)
 
     def load_text_heads(self, model_path):
         state_dict = self.load_safetensors_state_dict(model_path)
@@ -207,7 +317,24 @@ class ModelInitializerLoader:
                 raise KeyError(f"Missing key {weight_key} or {bias_key} in checkpoint")
             head.weight.data.copy_(state_dict[weight_key])
             head.bias.data.copy_(state_dict[bias_key])
-            head.to(self.device)
+            head.to(self.device, dtype=self.dtype)
+
+    def load_event_head(self, model_path):
+        """Load the output-only event head from saved safetensors (for inference)."""
+        if not self.use_event_head:
+            return
+
+        self.event_head = torch.nn.Linear(self.hidden_size, self.num_event_classes)
+
+        state_dict = self.load_safetensors_state_dict(model_path)
+
+        for key in ["event_head.weight", "event_head.bias"]:
+            if key not in state_dict:
+                raise KeyError(f"Missing key '{key}' in checkpoint {model_path}")
+
+        self.event_head.weight.data.copy_(state_dict["event_head.weight"])
+        self.event_head.bias.data.copy_(state_dict["event_head.bias"])
+        self.event_head.to(self.device, dtype=self.dtype)
 
     def load_audio_embeds(self, model_path):
         """Load separate audio embeddings from saved safetensors."""
@@ -242,7 +369,7 @@ class ModelInitializerLoader:
 
         # Move embeddings to model's device
         for emb in self.audio_embeds:
-            emb.to(self.device)
+            emb.to(self.device, dtype=self.dtype)
 
     def load_speaker_embed_proj(self, model_path, spk_emb_dim):
         """
@@ -259,4 +386,4 @@ class ModelInitializerLoader:
 
         self.speaker_embed_proj.weight.data.copy_(state_dict[weight_key])
         self.speaker_embed_proj.bias.data.copy_(state_dict[bias_key])
-        self.speaker_embed_proj.to(self.device)
+        self.speaker_embed_proj.to(self.device, dtype=self.dtype)

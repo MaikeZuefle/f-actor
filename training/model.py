@@ -3,7 +3,14 @@ import os
 import torch
 from huggingface_hub import snapshot_download
 from modeling_dsu import DSULlama
-from special_tokens import TEXT_STREAM_TOKENS
+from special_tokens import (
+    EOU,
+    EPAD,
+    SILENCE_PAD,
+    TEXT_STREAM_TOKENS,
+    UTTERANCE_PAD,
+    WORD_PAD,
+)
 from transformers import AutoConfig, AutoTokenizer
 
 
@@ -63,6 +70,20 @@ def load_model(model_args, grad_acc_steps=1, logger=None, inference=False):
     config.audio_vocab_size = model_args.audio_vocab_size
     config.use_speaker_embedding = model_args.use_speaker_embedding
     config.calc_loss_on_c1_only = model_args.calc_loss_on_c1_only
+    config.first_codebook_weight = model_args.first_codebook_weight
+    config.text_padding_weight = model_args.text_padding_weight
+    config.silence_pad_weight = model_args.silence_pad_weight
+    config.use_depth_decoder = model_args.use_depth_decoder
+    config.depth_decoder_pretrained_path = model_args.depth_decoder_pretrained_path
+    config.depth_decoder_unfreeze_after_steps = (
+        model_args.depth_decoder_unfreeze_after_steps
+    )
+    config.depth_decoder_use_speaker_embedding = (
+        model_args.depth_decoder_use_speaker_embedding
+    )
+    config.use_event_head = model_args.use_event_head
+    config.event_focal_gamma = model_args.event_focal_gamma
+    config.event_focal_alpha = model_args.event_focal_alpha
 
     # load model (if num_dsu < 1, this will be the normal model)
     model = model_cls.from_pretrained(
@@ -91,6 +112,10 @@ def load_model(model_args, grad_acc_steps=1, logger=None, inference=False):
             new_special_tokens=TEXT_STREAM_TOKENS,
             logger=logger,
         )
+        model.text_padding_ids = tokenizer.convert_tokens_to_ids(
+            [UTTERANCE_PAD, WORD_PAD]
+        )
+        model.silence_pad_ids = tokenizer.convert_tokens_to_ids([SILENCE_PAD])
 
     if model.get_input_embeddings().num_embeddings < len(tokenizer):
         model.resize_token_embeddings(len(tokenizer))
@@ -108,10 +133,16 @@ def load_model(model_args, grad_acc_steps=1, logger=None, inference=False):
     if model_args.multi_text_stream:
         model.init_or_load_text_heads(model_path=model_id)
 
+    if model_args.use_event_head:
+        model.init_or_load_event_head(model_path=model_id)
+
     if model.num_dsus > 0:
-        model.init_or_load_audio_heads(
-            model_path=model_id
-        )  # loads if dsu_head exists, else initializes
+        if model_args.use_depth_decoder:
+            model.init_or_load_depth_decoder_head(model_path=model_id)
+        else:
+            model.init_or_load_audio_heads(
+                model_path=model_id
+            )  # loads if dsu_head exists, else initializes
         model.init_or_load_audio_embeds(
             model_path=model_id
         )  # loads if audio_embeds exist, else initializes
