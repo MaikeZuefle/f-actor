@@ -203,6 +203,7 @@ class BackchannelLogitsProcessor:
         eou_id,
         word_pad_id,
         inter_token_id=None,
+        silence_pad_id=None,
         max_word_pad_frames=6,
         use_eou=True,
         batch_size=1,
@@ -216,6 +217,14 @@ class BackchannelLogitsProcessor:
         self.cooldown_steps = cooldown_steps
         self.bc_token_id = bc_token_id
         self.inter_token_id = inter_token_id
+        # If set, force [SILENCE_PAD] (rather than letting the LM head
+        # sample freely) for the whole cooldown window after a forced
+        # backchannel completes - matching the token training data uses for
+        # "no speech content here" (get_text_stream.py's add_audio_delay),
+        # so the model doesn't immediately start another utterance right
+        # after being forced to backchannel. None preserves the old
+        # behavior (free sampling, [BC]/[INTER] masked, during cooldown).
+        self.silence_pad_id = silence_pad_id
 
         B = batch_size
         self.mode = [FREE] * B
@@ -262,7 +271,10 @@ class BackchannelLogitsProcessor:
                 allowed = {self.bc_token_id}
             elif self.mode[b] == FORCED:
                 allowed = self.trie.allowed_tokens(self.trie_state[b])
-            else:  # FREE (no trigger) or COOLDOWN: never let [BC]/[INTER] through
+            elif self.mode[b] == COOLDOWN and self.silence_pad_id is not None:
+                allowed = {self.silence_pad_id}
+            else:  # FREE (no trigger), or COOLDOWN without forced silence:
+                # never let [BC]/[INTER] through
                 allowed = None
 
             if allowed is None:
