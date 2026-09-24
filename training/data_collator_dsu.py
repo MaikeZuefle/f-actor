@@ -35,6 +35,7 @@ class DSUDataCollator(DataCollatorForLanguageModeling):
         # extract these so parent collator works
         all_dsu_ids = [f.pop("dsu_ids") for f in features]
         all_text_streams = [f.pop("text_stream_ids", None) for f in features]
+        all_event_ids = [f.pop("event_ids", None) for f in features]
         spk_emb = [f.pop("spk_emb", None) for f in features]
 
         # First, pad input_ids and other standard fields using parent collator
@@ -58,6 +59,9 @@ class DSUDataCollator(DataCollatorForLanguageModeling):
             streams.append(
                 (all_text_streams, len(all_text_streams[0]), "text_stream_ids")
             )
+
+        if all_event_ids[0] is not None:
+            streams.append((all_event_ids, len(all_event_ids[0]), "event_ids"))
 
         for data_list, num_streams, batch_key in streams:
             # compute max length across batch for this stream type
