@@ -19,7 +19,7 @@ Spoken conversational systems require more than accurate speech generation to ha
 
 ## Released Resources
 
-- 🆕 🤗 **Model (streaming, Mimi + depth-transformer)**: https://huggingface.co/JSALT2026-Conv-AI-Simulator/f-actor-mimi-fisher
+- 🆕 🤗 **Model (streaming, Mimi + depth-transformer)**: https://huggingface.co/JSALT2026-Conv-AI-Simulator/f-actor-mimi-behavior-sd
 
 - 🆕 🤗 **Model (streaming, Mimi + depth-transformer, backchannel head)**: https://huggingface.co/JSALT2026-Conv-AI-Simulator/f-actor-mimi-fisher-bc-head
 
