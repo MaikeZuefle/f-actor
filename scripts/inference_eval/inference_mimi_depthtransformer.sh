@@ -3,7 +3,7 @@ CONVERT_TO_AUDIO=true
 
 
 # directories
-MODEL_DIR=MODEL_DIR_NEEDS_TO_BE_DEFINED/"f-actor-mimi-behavior-sd-depthtransformer"
+MODEL_DIR="JSALT2026-Conv-AI-Simulator/f-actor-mimi-behavior-sd"
 INFERENCE_DIR=NEEDS_TO_BE_DEFINED
 
 # model

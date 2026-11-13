@@ -13,7 +13,7 @@ import re
 
 def load_model():
     model_args = ModelArgs(
-        model_id="JSALT2026-Conv-AI-Simulator/f-actor-mimi-fisher",
+        model_id="JSALT2026-Conv-AI-Simulator/f-actor-mimi-behavior-sd",
         num_dsus=8,
         text_stream=True,
         audio_vocab_size=2049,
